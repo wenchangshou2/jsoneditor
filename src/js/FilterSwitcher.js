@@ -3,51 +3,37 @@
 var ContextMenu = require('./ContextMenu');
 
 /**
- * Create a select box to be used in the editor menu's, which allows to switch mode
+ * Create a select box to be used in the editor menu's, which allows to switch filter mode 
  * @param {HTMLElement} container
- * @param {String[]} modes  Available modes: 'code', 'form', 'text', 'tree', 'view'
- * @param {String} current  Available modes: 'code', 'form', 'text', 'tree', 'view'
+ * @param {String[]} modes  Available modes: 'all','difference','identical'
+ * @param {String} current  Available modes: 'all','difference','identical'
  * @param {function(mode: string)} onSwitch  Callback invoked on switch
  * @constructor
  */
-function ModeSwitcher(container, modes, current, onSwitch) {
+function FilterSwitcher(container, modes, current, onSwitch) {
   // available modes
   var availableModes = {
-    code: {
-      'text': 'Code',
-      'title': 'Switch to code highlighter',
+    all: {
+      'text': 'all',
+      'title': 'Switch to all filter condition',
       'click': function () {
-        onSwitch('code')
+        onSwitch('all')
       }
     },
-    form: {
-      'text': 'Form',
-      'title': 'Switch to form editor',
+    difference: {
+      'text': 'difference',
+      'title': 'Switch to difference condition mode',
       'click': function () {
-        onSwitch('form');
+        onSwitch('difference');
       }
     },
-    text: {
-      'text': 'Text',
-      'title': 'Switch to plain text editor',
+    identical: {
+      'text': 'identical',
+      'title': 'Switch to identical condition',
       'click': function () {
-        onSwitch('text');
+        onSwitch('identical');
       }
     },
-    tree: {
-      'text': 'Tree',
-      'title': 'Switch to tree editor',
-      'click': function () {
-        onSwitch('tree');
-      }
-    },
-    view: {
-      'text': 'View',
-      'title': 'Switch to tree view',
-      'click': function () {
-        onSwitch('view');
-      }
-    }
   };
 
   // list the selected modes
@@ -87,30 +73,29 @@ function ModeSwitcher(container, modes, current, onSwitch) {
   frame.appendChild(box);
 
   container.appendChild(frame);
-
   this.dom = {
     container: container,
     box: box,
     frame: frame
   };
+  console.log('this.dom',this.dom);
 }
 
 /**
  * Set focus to switcher
  */
-ModeSwitcher.prototype.focus = function () {
+FilterSwitcher.prototype.focus = function () {
   this.dom.box.focus();
 };
 
 /**
- * Destroy the ModeSwitcher, remove from DOM
+ * Destroy the FilterSwitcher, remove from DOM
  */
-ModeSwitcher.prototype.destroy = function () {
+FilterSwitcher.prototype.destroy = function () {
   if (this.dom && this.dom.frame && this.dom.frame.parentNode) {
     this.dom.frame.parentNode.removeChild(this.dom.frame);
   }
-  console.log('dom',this.dom);
   this.dom = null;
 };
 
-module.exports = ModeSwitcher;
+module.exports = FilterSwitcher;

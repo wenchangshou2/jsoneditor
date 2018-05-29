@@ -8,6 +8,7 @@ var ContextMenu = require('./ContextMenu');
 var TreePath = require('./TreePath');
 var Node = require('./Node');
 var ModeSwitcher = require('./ModeSwitcher');
+var FilterSwitcher = require('./FilterSwitcher');
 var util = require('./util');
 var autocomplete = require('./autocomplete');
 var translate = require('./i18n').translate;
@@ -102,6 +103,10 @@ treemode.destroy = function () {
     this.modeSwitcher.destroy();
     this.modeSwitcher = null;
   }
+  if (this.filterSwitcher){
+    this.filterSwitcher.destroy();
+    this.filterSwitcher=null;
+  }
 };
 
 /**
@@ -119,7 +124,9 @@ treemode._setOptions = function (options) {
     schemaRefs: null,
     autocomplete: null,
     navigationBar : true,
-    onSelectionChange: null
+    onSelectionChange: null,
+    onSetPath: null,
+    onSetFilter: null,
   };
 
   // copy all options
@@ -139,6 +146,12 @@ treemode._setOptions = function (options) {
 
   if (options.onSelectionChange) {
     this.onSelectionChange(options.onSelectionChange);
+  }
+  if(options.onSetPath){
+    this.onSetPath(options.onSetPath)
+  }
+  if(options.onSetFilter){
+    this.onSetFilter(options.onSetFilter)
   }
 
   setLanguages(this.options.languages);
@@ -677,6 +690,8 @@ treemode._createFrame = function () {
   }
   this.frame.onclick = function (event) {
     var target = event.target;// || event.srcElement;
+    console.log(target,event);
+    
 
     onEvent(event);
 
@@ -770,6 +785,20 @@ treemode._createFrame = function () {
       // switch mode and restore focus
       me.setMode(mode);
       me.modeSwitcher.focus();
+    });
+    this.filterSwitcher = new FilterSwitcher(this.menu, ["all","difference"], "all", function onSwitch(mode) {
+      if(mode!='all'){
+        me.deepData = me.getText();
+      }else{
+        me.setText(me.deepData);
+      }
+      if(me._setFilter){
+        me._setFilter(mode);
+      }
+      // me.filterSwitcher.destroy();
+      // me.setFilter(mode);
+      // switch mode and restore focus
+      // me.filterSwitcher.focus();
     });
   }
 
@@ -899,6 +928,13 @@ treemode._updateTreePath = function (pathNodes) {
     util.removeClassName(this.navBar, 'nav-bar-empty');
     
     var pathObjs = [];
+    if (this._setPath) {
+      let arr = []
+      for (let i = 0; i < pathNodes.length; i++) {
+        arr.push(getName(pathNodes[i]))
+      }
+      this._setPath(arr)
+    }
     pathNodes.forEach(function (node) {
       var pathObj = {
         name: getName(node),
@@ -1404,6 +1440,16 @@ treemode.onSelectionChange = function (callback) {
     this._selectionChangedHandler = util.debounce(callback, this.DEBOUNCE_INTERVAL);
   }
 };
+treemode.onSetPath=function(callback){
+  if (typeof callback==='function'){
+    this._setPath = util.debounce(callback, this.DEBOUNCE_INTERVAL);
+  }
+}
+treemode.onSetFilter=function(callback){
+  if (typeof callback==='function'){
+    this._setFilter = util.debounce(callback, this.DEBOUNCE_INTERVAL);
+  }
+}
 
 /**
  * Select range of nodes.

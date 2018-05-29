@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>JSON 编辑器</title>
+    <link rel="stylesheet" href="../dist/jsoneditor.css" type="text/css">
+    <script src="../dist/jsoneditor.js"></script>
+    <script src="./js/filereader.js"></script>
+    <script src="./js/FileSaver.min.js"></script>
+    <script src="./js/jquery.min.js"></script>
+    <script type="text/javascript" src="./bower_components/crypto-js/crypto-js.js"></script>
+    <style>
+        .btn {}
+
+        .btn input:first-child {
+            margin-left: 100px;
+        }
+
+        .btn button {
+            margin-left: 10px;
+        }
+
+        #jsoneditor {
+            width: 50%;
+            height: 500px;
+        }
+
+        #jsonPreview {
+            width: 50%;
+            height: 500px;
+        }
+
+        #loadDocument {
+            width: 200px;
+        }
+
+        .center {
+            width: 150px;
+            height: 500px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .center input {
+            margin-top: 10px;
+        }
+
+        .Grid {
+            margin: 0 auto;
+            display: flex;
+            width: 90%;
+            justify-content: space-around;
+            margin-top: 20px;
+        }
+    </style>
+    <script>
+        function objectEquals(x, y) {
+            if (x instanceof Function) {
+                if (y instanceof Function) {
+                    return x.toString() === y.toString();
+                }
+                return false;
+            }
+            if (x === null || x === undefined || y === null || y === undefined) {
+                return x === y;
+            }
+            if (x === y || x.valueOf() === y.valueOf()) {
+                return true;
+            }
+            if (x instanceof Date) {
+                return false;
+            }
+            if (y instanceof Date) {
+                return false;
+            }
+            if (!(x instanceof Object)) {
+                return false;
+            }
+            if (!(y instanceof Object)) {
+                return false;
+            }
+            var p = Object.keys(x);
+            return Object.keys(y).every(function (i) {
+                    return p.indexOf(i) !== -1;
+                }) ?
+                p.every(function (i) {
+                    return objectEquals(x[i], y[i]);
+                }) : false;
+        }
+
+        window.onload = function () {
+            let key = "ZoolonCorp DataInsight adocat";
+            let editor = new JSONEditor(document.getElementById('jsoneditor'))
+            let preview = new JSONEditor(document.getElementById('jsonPreview'), {
+                mode: 'tree',
+                multiple:true,
+                modes: ['text', 'code','tree'],
+                onSetPath:function(event){
+                    console.log('setpath',event);
+                }
+            });
+            FileReaderJS.setupInput(document.getElementById('loadDocument'), {
+                readAsDefault: 'Text',
+                on: {
+                    load: function (event, file) {
+                        let chkEncrypt = document.getElementById('chkEncrypt').checked
+                        let json = {}
+                        if (chkEncrypt) {
+                            var bytes = CryptoJS.AES.decrypt(event.target.result, key);
+                            var plaintext = bytes.toString(CryptoJS.enc.Utf8);
+                            try {
+                                json = JSON.parse(plaintext)
+                            } catch (err) {
+                                alert('parse json data error')
+                                return
+                            }
+                        } else {
+                            try {
+                                json = JSON.parse(event.target.result)
+                            } catch (err) {
+                                alert('parse json data error')
+                                return
+                            }
+                        }
+                        json.insights = json.insights.map((item, idx) => {
+                            item.content = typeof item.content === "string" ? JSON.parse(item.content
+                                .replace(/\\"/g, '"')) : item.content;
+                            item.basic = typeof item.basic === "string" ? JSON.parse(item.basic
+                                .replace(/\\"/g, '"')) : item.basic;
+                            item.aynamic = typeof item.aynamic === "string" ? JSON.parse(item.aynamic
+                                .replace(/\\"/g, '"')) : item.aynamic;
+                            return item
+                        })
+                        json = JSON.stringify(json, null, 2)
+                        editor.setText(json);
+                        preview.setText(json);
+                    }
+                }
+            });
+            document.getElementById("saveDocument").onclick = function () {
+                let editorText = editor.getText()
+                let previewText = preview.getText()
+                let chkEncrypt = document.getElementById('chkEncrypt').checked
+                if (objectEquals(JSON.parse(editorText), JSON.parse(previewText))) {
+                    if (chkEncrypt) {
+                        let data = CryptoJS.AES.encrypt(editorText, key)
+                        console.log(editorText, key);
+                        var blob = new Blob([data], {
+                            type: 'application/json;chartset=utf-8'
+                        });
+                        saveAs(blob, "DataInsight");
+                    }
+
+                } else {
+                    alert("同步两边数据")
+                }
+            }
+            document.getElementById("toLeft").onclick = function () {
+                console.dir(preview);
+                editor.setText(preview.getText())
+            }
+            document.getElementById("toRight").onclick = function () {
+                let json = JSON.stringify(JSON.parse(editor.getText()), null, 2)
+                preview.setText(json)
+            }
+            document.getElementById("copyLeft").onclick = function () {
+                let items = $(".selectItem:checked");
+                for(let item of items){
+                    console.log('item',item);
+                }
+            }
+        }
+    </script>
+
+</head>
+
+<body>
+    <h1>JSON 在线编辑器</h1>
+    <div class="btn">
+        <!-- <button id="loadDocument">加载</button> -->
+        <input type="file" id="loadDocument" value="加载">
+        <!-- <input type="file"  id="saveDocument" value="保存"> -->
+        是否加密:
+        <input type="checkbox" id="chkEncrypt" />
+        <button id="saveDocument">保存</button>
+    </div>
+    <div class="Grid">
+        <div class="Grid-cell" id="jsoneditor"></div>
+        <div class="center">
+            <input type="button" value="<<<<<" id="toLeft">
+            <input type="button" value=">>>>>" id="toRight">
+            <input type="button" value="向左拷贝" id="copyLeft">
+            <input type="button" value="向右拷貝" id="copyLeft">
+        </div>
+        <div class="Grid-cell" id="jsonPreview"></div>
+    </div>
+</body>
+
+</html>

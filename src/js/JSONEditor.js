@@ -1,5 +1,4 @@
 'use strict';
-
 var Ajv;
 try {
   Ajv = require('ajv');
@@ -7,7 +6,6 @@ try {
 catch (err) {
   // no problem... when we need Ajv we will throw a neat exception
 }
-
 var treemode = require('./treemode');
 var textmode = require('./textmode');
 var util = require('./util');
@@ -90,8 +88,8 @@ function JSONEditor (container, options, json) {
         'ajv', 'schema', 'schemaRefs','templates',
         'ace', 'theme','autocomplete',
         'onChange', 'onEditable', 'onError', 'onModeChange', 'onSelectionChange', 'onTextSelectionChange',
-        'escapeUnicode', 'history', 'search', 'mode', 'modes', 'name', 'indentation', 
-        'sortObjectKeys', 'navigationBar', 'statusBar', 'languages', 'language'
+        'onSetPath','onSetFilter','escapeUnicode', 'history', 'search', 'mode', 'modes', 'name', 'indentation', 
+        'sortObjectKeys', 'navigationBar', 'statusBar', 'languages', 'language',"multiple","multipleField","filter","filters"
       ];
 
       Object.keys(options).forEach(function (option) {
@@ -123,6 +121,7 @@ function JSONEditor (container, options, json) {
  * @type { Object.<String, {mixin: Object, data: String} > }
  */
 JSONEditor.modes = {};
+JSONEditor.filters={};
 
 // debounce interval for JSON schema vaidation in milliseconds
 JSONEditor.prototype.DEBOUNCE_INTERVAL = 150;
@@ -140,6 +139,9 @@ JSONEditor.prototype._create = function (container, options, json) {
   this.json = json || {};
 
   var mode = this.options.mode || (this.options.modes && this.options.modes[0]) || 'tree';
+  var filter=this.options.filter||(this.options.filters&&this.options.filters[0])||'all';
+  var multiple = this.options.multiple || 'false'
+  var multipleField = this.options.multipleField || []
   this.setMode(mode);
 };
 
@@ -252,6 +254,67 @@ JSONEditor.prototype.setMode = function (mode) {
   }
   else {
     throw new Error('Unknown mode "' + options.mode + '"');
+  }
+};
+/**
+ * Change the mode of the editor.
+ * JSONEditor will be extended with all methods needed for the chosen mode.
+ * @param {String} mode     Available modes: 'tree' (default), 'view', 'form',
+ *                          'text', and 'code'.
+ */
+JSONEditor.prototype.setFilter = function (filter) {
+  var container = this.container;
+  var options = util.extend({}, this.options);
+  var oldFilter = options.filter;
+  var data;
+  var name;
+
+  options.filter = filter;
+  let config;
+  for(let item of options.filter){
+    if(item===filter){
+      config=item
+    }
+  }
+  // var config = options.filters[filter];
+  if (config) {
+    try {
+      var asText = (config.data == 'text');
+      name = this.getName();
+      data = this[asText ? 'getText' : 'get'](); // get text or json
+
+      this.destroy();
+      util.clear(this);
+      util.extend(this, config.mixin);
+      this.create(container, options);
+
+      this.setName(name);
+      this[asText ? 'setText' : 'set'](data); // set text or json
+
+      if (typeof config.load === 'function') {
+        try {
+          config.load.call(this);
+        }
+        catch (err) {
+          console.error(err);
+        }
+      }
+
+      if (typeof options.onFilterChange === 'function' && filter !== oldFilter) {
+        try {
+          // options.onModeChange(filter, oldFilter);
+        }
+        catch (err) {
+          console.error(err);
+        }
+      }
+    }
+    catch (err) {
+      this._onError(err);
+    }
+  }
+  else {
+    throw new Error('Unknown filter "' + options.filter + '"');
   }
 };
 

@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>JSON 编辑器</title>
+    <link rel="stylesheet" href="../dist/jsoneditor.css" type="text/css">
+    <script src="../dist/jsoneditor.js"></script>
+    <script src="./js/filereader.js"></script>
+    <script src="./js/FileSaver.min.js"></script>
+    <script src="./js/jquery.min.js"></script>
+    <script src="./js/lodash.min.js"></script>
+    <script src="js/demo.js"></script>
+    <script type="text/javascript" src="./bower_components/crypto-js/crypto-js.js"></script>
+
+    <style>
+        .menu {
+            width: 90%;
+            height: 100px;
+            background-color: blanchedalmond;
+            margin: 0 auto;
+            display: flex;
+        }
+
+        .menu .left {
+            /* width:40%; */
+            padding-left: 5%;
+            flex: 1;
+        }
+
+        .menu .right {
+            padding-top: 20px;
+            flex: 1;
+            display: flex;
+            flex-wrap: wrap;
+            align-content: center;
+        }
+
+        .menu .right>div {}
+
+        .menu .right input[type=text] {
+            width: 80px;
+        }
+
+        .menu .right div {
+            margin-bottom: 5px;
+            margin-left: 10px;
+        }
+
+        .btn {
+            margin-top: 20px;
+            /* padding-left: 100px; */
+        }
+
+        .btn input:first-child {
+            /* margin-left: 100px; */
+        }
+
+        .btn button {
+            margin-left: 10px;
+        }
+
+        .editItem {
+            width: 40%;
+            background-color: red;
+        }
+
+        #jsoneditor {
+            width: 50%;
+            height: 500px;
+        }
+
+        #jsoneditor2 {
+            width: 50%;
+            height: 500px;
+        }
+
+        #leftLoadDocument,
+        #rightLoadDocument {
+            width: 200px;
+        }
+
+        .center {
+            width: 150px;
+            height: 500px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .center input {
+            margin-top: 10px;
+        }
+
+        .Grid {
+            margin: 0 auto;
+            display: flex;
+            width: 90%;
+            justify-content: space-around;
+            margin-top: 20px;
+        }
+    </style>
+    <script>
+        let editor, editor2;
+
+        function objectEquals(x, y) {
+            if (x instanceof Function) {
+                if (y instanceof Function) {
+                    return x.toString() === y.toString();
+                }
+                return false;
+            }
+            if (x === null || x === undefined || y === null || y === undefined) {
+                return x === y;
+            }
+            if (x === y || x.valueOf() === y.valueOf()) {
+                return true;
+            }
+            if (x instanceof Date) {
+                return false;
+            }
+            if (y instanceof Date) {
+                return false;
+            }
+            if (!(x instanceof Object)) {
+                return false;
+            }
+            if (!(y instanceof Object)) {
+                return false;
+            }
+            var p = Object.keys(x);
+            return Object.keys(y).every(function (i) {
+                    return p.indexOf(i) !== -1;
+                }) ?
+                p.every(function (i) {
+                    return objectEquals(x[i], y[i]);
+                }) : false;
+        }
+
+        function getObjectDiff(object, base) {
+            function changes(object, base) {
+                return _.transform(object, function (result, value, key) {
+                    if (!_.isEqual(value, base[key])) {
+                        result[key] = (_.isObject(value) && _.isObject(base[key])) ? changes(value, base[key]) :
+                            value;
+                    }
+                });
+            }
+            return changes(object, base);
+        }
+
+
+        function dataFilter(data) {
+            data.insights.map((item, idx) => {
+                item.content = typeof item.content === "string" ? JSON.parse(item.content
+                    .replace(/\\"/g, '"')) : item.content;
+                item.basic = typeof item.basic === "string" ? JSON.parse(item.basic
+                    .replace(/\\"/g, '"')) : item.basic;
+                item.aynamic = typeof item.aynamic === "string" ? JSON.parse(item.aynamic
+                    .replace(/\\"/g, '"')) : item.aynamic;
+                return item
+            })
+            return data;
+        }
+
+        function parseData(text, key) {
+            let json = {}
+            try {
+                json = JSON.parse(text)
+                return json
+            } catch (err) {
+                try {
+                    let bytes = CryptoJS.AES.decrypt(text, key);
+                    let plaintext = bytes.toString(CryptoJS.enc.Utf8);
+                    json = JSON.parse(plaintext)
+                    return json
+                } catch (err) {
+                    return null
+                }
+            }
+        }
+
+        function getFileReaderParams(encryptId, editor, key) {
+            return {
+                readAsDefault: "Text",
+                on: {
+                    load: function (event, file) {
+                        let json = {}
+                        json = parseData(event.target.result, key)
+                        if (json === null) {
+                            alert('json data error')
+                            return
+                        }
+                        json = dataFilter(json); //数据格式化
+                        json = JSON.stringify(json, null, 2)
+                        editor.setText(json);
+                    }
+                }
+            }
+        }
+
+        function saveDocument(editor, encryptId, key) {
+            let _Editor = editor;
+            let _encryptId = encryptId;
+            return function () {
+                let Text = _Editor.getText();
+                let chkEncrypt = document.getElementById(_encryptId).checked
+                let data = Text;
+                data = chkEncrypt ? CryptoJS.AES.encrypt(Text, key) : data;
+                let blob = new Blob([data], {
+                    type: 'application/json;chartset=utf-8'
+                });
+                saveAs(blob, "DataInsight")
+            }
+        }
+
+        function isContain(arr, id) {
+            for (let item of arr) {
+                if (item.id === id) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        function generateInsights(arr, data) {
+            console.log('data', data);
+            let {
+                width,
+                height,
+                preMode,
+                theme,
+                style
+            } = data.basic;
+            let _wrap =
+                `
+            <div>
+                name:
+                <input type="text" id="txtName" value="${data.name}">
+            </div>
+            <div>
+                type:
+                <select>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                </select>
+            </div>
+            <div>
+                user:<select>
+            `
+            for (let item of arr.users) {
+                _wrap +=
+                    `<option ${data.userid===item.id?'selected="selected"':""} value="${item.id}">${item.name}</option>`
+            }
+            _wrap += "</select></div><div>分组<select>";
+            for (let item of arr.groups) {
+                _wrap +=
+                    `<option ${data.groupID===item.id?'selected="selected"':""} value="${item.id}">${item.name}</option>`
+            }
+            _wrap += "</select></div>"
+            _wrap += "<div>"
+            _wrap += `width:<input type="text" id="txtWidth" value="${width}"/>`
+            _wrap += "</div>"
+            _wrap + "<div>"
+            _wrap += `width:<input type="text" id="txtHeight" value="${height}"/>`
+            _wrap += "</div>"
+
+            return _wrap
+        }
+
+        function generatorHtml(type, arr, data) {
+            if (type === "insights") {
+                return generateInsights(arr, data)
+            }
+        }
+
+        function setPath(event) {
+            let data = JSON.parse(this.getText());
+            if (event.length === 3) {
+                let name = event[0]
+                let first = event[1]
+                let second = event[2]
+                let html_wrap = generatorHtml(first, data, data[first][second])
+                let _wrap = $('#right').html(html_wrap)
+            }
+        }
+
+        function setFilter(model) {
+            if(model==='difference'){
+                let name = this.getName();
+                let comparing = name === "editor1" ? editor2.getText() : editor.getText();
+                comparing = JSON.parse(comparing)
+                let data = JSON.parse(this.getText());
+                let diff=getObjectDiff(data,comparing)
+                this.setText(JSON.stringify(diff,null,2))
+            }
+        }
+
+        window.onload = function () {
+            let key = "ZoolonCorp DataInsight adocat";
+            let options = {
+                mode: 'tree',
+                multiple: true,
+                multipleField: ['insights', 'users'],
+                modes: ['text', 'code', 'tree'],
+                filtes: ['all', 'difference'],
+                onSetPath: setPath,
+                onSetFilter: setFilter,
+            }
+            editor = new JSONEditor(document.getElementById('jsoneditor'), Object.assign({}, options, {
+                name: 'editor1',
+
+            }))
+            editor2 = new JSONEditor(document.getElementById('jsoneditor2'), Object.assign({}, options, {
+                name: 'editor2',
+            }));
+            let isEncrypt1 = document.getElementById('chkEncrypt').checked;
+            let isEncrypt2 = document.getElementById('chkEncrypt2').checked;
+
+            FileReaderJS.setupInput(document.getElementById('leftLoadDocument'), getFileReaderParams('chkEncrypt',
+                editor, key));
+            editor.setText(JSON.stringify(getDemoData(), null, 2))
+            FileReaderJS.setupInput(document.getElementById('rightLoadDocument'), getFileReaderParams('chkEncrypt2',
+                editor2, key));
+            document.getElementById("saveDocument").onclick = saveDocument(editor, 'chkEncrypt', key)
+            document.getElementById("saveDocument2").onclick = saveDocument(editor2, 'chkEncrypt2', key)
+            document.getElementById("toLeft").onclick = function () {
+                let json = JSON.stringify(JSON.parse(editor2.getText()), null, 2)
+                editor.setText(json)
+            }
+            document.getElementById("toRight").onclick = function () {
+                let json = JSON.stringify(JSON.parse(editor.getText()), null, 2)
+                editor2.setText(json)
+            }
+            document.getElementById("copyLeft").onclick = function () {
+                let items = $("#jsoneditor2 .selectItem:checked");
+                for (let item of items) {
+                    console.log('item', item);
+                }
+            }
+            document.getElementById("copyRight").onclick = function () {
+                let items = $("#jsoneditor .selectItem:checked");
+                let leftData = JSON.parse(editor.getText());
+                let rightData = JSON.parse(editor2.getText());
+                for (let item of items) {
+                    let k = item.name.split('-')
+                    if (k.length === 2) {
+                        let first = k[0];
+                        let second = k[1];
+                        let _data = leftData[first][second]
+                        if (isContain(rightData[first], _data.id)) { //拷贝的数据已存在相同的id
+
+                        } else {
+                            let _tmp = {}
+                            $.extend(_tmp, leftData[first][second])
+                            rightData[first].push(_tmp);
+                        }
+                    }
+                }
+                json = JSON.stringify(rightData, null, 2)
+                editor2.setText(json)
+            }
+        }
+    </script>
+
+</head>
+
+<body>
+    <h1>JSON 在线编辑器</h1>
+    <div class="menu">
+        <div class="left">
+            <div class="btn">
+                <!-- <button id="loadDocument">加载</button> -->
+                左侧文件加载:
+                <input type="file" id="leftLoadDocument" value="加载">
+                <!-- <input type="file"  id="saveDocument" value="保存"> -->
+                加密数据库
+                <input type="checkbox" id="chkEncrypt" />
+                <button id="saveDocument">保存</button>
+            </div>
+            <div class="btn">
+                <!-- <button id="loadDocument">加载</button> -->
+                右侧文件加载:
+                <input type="file" id="rightLoadDocument" value="加载">
+                <!-- <input type="file"  id="saveDocument" value="保存"> -->
+                加密数据库
+                <input type="checkbox" id="chkEncrypt2" />
+                <button id="saveDocument2">保存</button>
+            </div>
+        </div>
+        <div class="right" id="right">
+
+        </div>
+    </div>
+    <div class="Grid">
+        <div class="Grid-cell" id="jsoneditor"></div>
+        <div class="center">
+            <input type="button" value="<<" id="toLeft">
+            <input type="button" value=">>" id="toRight">
+            <input type="button" value="向左拷贝" id="copyLeft">
+            <input type="button" value="向右拷贝" id="copyRight">
+        </div>
+        <div class="Grid-cell" id="jsoneditor2"></div>
+    </div>
+</body>
+
+</html>
