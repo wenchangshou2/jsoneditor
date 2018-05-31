@@ -126,7 +126,9 @@ treemode._setOptions = function (options) {
     navigationBar : true,
     onSelectionChange: null,
     onSetPath: null,
+    onDuplicate: null,
     onSetFilter: null,
+    onRemoveNode:null,
   };
 
   // copy all options
@@ -149,6 +151,12 @@ treemode._setOptions = function (options) {
   }
   if(options.onSetPath){
     this.onSetPath(options.onSetPath)
+  }
+  if(options.onDuplicate){
+    this.onDuplicate(options.onDuplicate)
+  }
+  if(options.onRemoveNode){
+    this.onRemoveNode(options.onRemoveNode)
   }
   if(options.onSetFilter){
     this.onSetFilter(options.onSetFilter)
@@ -917,6 +925,16 @@ treemode._onEvent = function (event) {
     node.onEvent(event);
   }
 };
+treemode._removeNode = function (node,parent) {
+  if (this._removeNode) {
+    this._removeNode(node,parent);
+  }
+}
+treemode._duplicateNode = function (node) {
+  if (this._duplicate) {
+    this._duplicate(node);
+  }
+}
 
 /**
  * Update TreePath components
@@ -1443,6 +1461,16 @@ treemode.onSelectionChange = function (callback) {
 treemode.onSetPath=function(callback){
   if (typeof callback==='function'){
     this._setPath = util.debounce(callback, this.DEBOUNCE_INTERVAL);
+  }
+}
+treemode.onDuplicate=function(callback){
+  if (typeof callback === 'function') {
+    this._duplicate = util.debounce(callback, this.DEBOUNCE_INTERVAL);
+  }
+}
+treemode.onRemoveNode=function(callback){
+  if(typeof callback==='function'){
+    this._removeNode = util.debounce(callback, this.DEBOUNCE_INTERVAL);
   }
 }
 treemode.onSetFilter=function(callback){

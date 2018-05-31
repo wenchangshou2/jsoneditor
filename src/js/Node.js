@@ -2879,11 +2879,16 @@ Node.onRemove = function (nodes) {
   }
 
   if (nodes && nodes.length > 0) {
+    console.log('remove nodes',nodes);
     var firstNode = nodes[0];
     var parent = firstNode.parent;
     var editor = firstNode.editor;
     var firstIndex = firstNode.getIndex();
+    var parentField=parent.field
+    let data = JSON.parse(editor.getText());
     editor.highlighter.unhighlight();
+    let copy = data[parentField][firstIndex]
+    editor._removeNode(copy,parentField);
 
     // adjust the focus
     var oldSelection = editor.getDomSelection();
@@ -2941,6 +2946,7 @@ Node.onDuplicate = function (nodes) {
       editor.select(clones);
     }
     var newSelection = editor.getDomSelection();
+    editor._duplicateNode(clones);
 
     editor._onAction('duplicateNodes', {
       afterNode: lastNode,
@@ -3092,7 +3098,6 @@ Node.prototype.sort = function (direction) {
 
   // update the index numbering
   this._updateDomIndexes();
-
   this.editor._onAction('sort', {
     node: this,
     oldChilds: oldChilds,
@@ -3581,6 +3586,7 @@ Node.prototype.showContextMenu = function (anchor, onClose) {
         title: translate('duplicateField'),
         className: 'jsoneditor-duplicate',
         click: function () {
+          console.log('node',node);
           Node.onDuplicate(node);
         }
       });

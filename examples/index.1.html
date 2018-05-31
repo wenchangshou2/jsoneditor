@@ -208,7 +208,14 @@
             return function () {
                 let Text = _Editor.getText();
                 let chkEncrypt = document.getElementById(_encryptId).checked
-                let data = Text;
+                let _tmp = JSON.parse(Text)
+                _tmp.insights.map((item, idx) => {
+                    item.content = JSON.stringify(item.content)
+                    item.basic = JSON.stringify(item.basic)
+                    item.aynamic = JSON.stringify(item.aynamic)
+                    return item
+                })
+                let data = JSON.stringify(_tmp);
                 data = chkEncrypt ? CryptoJS.AES.encrypt(Text, key) : data;
                 let blob = new Blob([data], {
                     type: 'application/json;chartset=utf-8'
@@ -225,8 +232,9 @@
             }
             return false;
         }
+
         function generateInsights(arr, data) {
-            console.log('data', data);
+            if (!data) return
             let {
                 width,
                 height,
@@ -288,13 +296,134 @@
         }
 
         function setFilter(model) {
-            if(model==='difference'){
+            if (model === 'difference') {
                 let name = this.getName();
                 let comparing = name === "editor1" ? editor2.getText() : editor.getText();
                 comparing = JSON.parse(comparing)
                 let data = JSON.parse(this.getText());
-                let diff=getObjectDiff(data,comparing)
-                this.setText(JSON.stringify(diff,null,2))
+                let diff = getObjectDiff(data, comparing)
+                this.setText(JSON.stringify(diff, null, 2))
+            }
+        }
+
+        function duplicateNode(node) {
+            console.log('duplicatenode', node);
+        }
+
+        function getResourceList(content) {
+            let arr = []
+            for (let item of content) {
+                if (item.type === "image") {
+                    let id = item.options.loadpic.id;
+                    if (id === undefined) continue;
+                    arr.push(id)
+                }
+            }
+            return arr;
+        }
+
+            function resourceManager(resources, id, operator) {
+            if (operator === "add") {
+                for (let i = 0; i < resources.length; i++) {
+                    if(resources[i].id===id){
+                        resources[i].reference = ++resources[i].reference; 
+                        return;
+                    }
+                }
+            }else{
+                for (let i = 0; i < resources.length; i++) {
+                    if(resources[i].id===id){
+                        resources[i].reference = ++resources[i].reference; 
+                        return;
+                    }
+                }
+
+            }
+        }
+
+        function removeNode(node, parent) {
+            console.log('remote', node, parent);
+            let data = JSON.parse(this.getText());
+            if (parent === 'insights') {
+                let resources = getResourceList(node.content)
+                console.log(223344, resources);
+            }
+        }
+
+        function findItem(arr, key, val) {
+            if (arr === undefined || arr.length === 0) {
+                return null;
+            }
+            for (let item of arr) {
+                if (item[key] === val) {
+                    return Object.assign({}, item)
+                }
+            }
+            return null
+        }
+
+        function getItemIndex(arr, key, val) {
+            if (arr === undefined || arr.length === 0) {
+                return -1;
+            }
+            for (let idx in arr) {
+                let item = arr[idx]
+                if (item[key] === val) {
+                    return idx
+                }
+            }
+            return -1
+        }
+
+        function copy(id, obj1, obj2) {
+            let _obj1 = obj1;
+            let _obj2 = obj2
+            return () => {
+                let items = $("#" + id + " .selectItem:checked");
+                let leftData = JSON.parse(_obj1.getText());
+                let rightData = JSON.parse(_obj2.getText());
+                for (let item of items) {
+                    let k = item.name.split('-')
+                    if (k.length === 2) {
+                        let first = k[0];
+                        let second = k[1];
+                        let _data = leftData[first][second]
+                        if (rightData.length > 0 && (rightData[first], _data.id)) { //拷贝的数据已存在相同的id
+
+                        } else {
+                            let _tmp = {}
+                            $.extend(_tmp, leftData[first][second])
+                            for (let _content of _tmp.content) {
+                                if (_content.type === "image") {
+                                    let id = _content.options.loadpic.id;
+                                    let resource = findItem(leftData.resources, 'id', id)
+                                    if (rightData.resources === undefined) {
+                                        rightData.resources = []
+                                    }
+                                    if (resource === null) continue
+                                    if (rightData.resources.length > 0) {
+                                        let _idx = getItemIndex(rightData.resources, 'md5', resource.md5)
+                                        if (_idx != -1) {
+                                            let _tmp = rightData.resources[_idx]
+                                            rightData.resources[_idx] = Object.assign({}, _tmp, {
+                                                reference: ++_tmp.reference
+                                            })
+                                        }
+                                    } else {
+                                        rightData.resources.push(Object.assign({}, resource, {
+                                            reference: 1
+                                        }))
+                                    }
+                                }
+                            }
+                            console.log('_tmp', _tmp);
+                            rightData[first].push(_tmp);
+                        }
+                    }
+                }
+                console.log('rightdata', rightData);
+                json = JSON.stringify(rightData, null, 2)
+                _obj2.setText(json)
             }
         }
 
@@ -308,6 +437,8 @@
                 filtes: ['all', 'difference'],
                 onSetPath: setPath,
                 onSetFilter: setFilter,
+                onDuplicate: duplicateNode,
+                onRemoveNode: removeNode,
             }
             editor = new JSONEditor(document.getElementById('jsoneditor'), Object.assign({}, options, {
                 name: 'editor1',
@@ -316,12 +447,10 @@
             editor2 = new JSONEditor(document.getElementById('jsoneditor2'), Object.assign({}, options, {
                 name: 'editor2',
             }));
-            let isEncrypt1 = document.getElementById('chkEncrypt').checked;
-            let isEncrypt2 = document.getElementById('chkEncrypt2').checked;
 
             FileReaderJS.setupInput(document.getElementById('leftLoadDocument'), getFileReaderParams('chkEncrypt',
                 editor, key));
-            editor.setText(JSON.stringify(getDemoData(), null, 2))
+            editor.setText(JSON.stringify(dataFilter(getDemoData()), null, 2))
             FileReaderJS.setupInput(document.getElementById('rightLoadDocument'), getFileReaderParams('chkEncrypt2',
                 editor2, key));
             document.getElementById("saveDocument").onclick = saveDocument(editor, 'chkEncrypt', key)
@@ -340,28 +469,8 @@
                     console.log('item', item);
                 }
             }
-            document.getElementById("copyRight").onclick = function () {
-                let items = $("#jsoneditor .selectItem:checked");
-                let leftData = JSON.parse(editor.getText());
-                let rightData = JSON.parse(editor2.getText());
-                for (let item of items) {
-                    let k = item.name.split('-')
-                    if (k.length === 2) {
-                        let first = k[0];
-                        let second = k[1];
-                        let _data = leftData[first][second]
-                        if (isContain(rightData[first], _data.id)) { //拷贝的数据已存在相同的id
-
-                        } else {
-                            let _tmp = {}
-                            $.extend(_tmp, leftData[first][second])
-                            rightData[first].push(_tmp);
-                        }
-                    }
-                }
-                json = JSON.stringify(rightData, null, 2)
-                editor2.setText(json)
-            }
+            document.getElementById("copyRight").onclick = copy('jsoneditor', editor, editor2);
+            document.getElementById("copyLeft").onclick = copy('jsoneditor2', editor2, editor);
         }
     </script>
 
