@@ -2,6 +2,8 @@ var fs = require('fs');
 var gulp = require('gulp');
 var gutil = require('gulp-util');
 var concatCss = require('gulp-concat-css');
+var babel = require('gulp-babel');
+
 var minifyCSS = require('gulp-clean-css');
 var shell = require('gulp-shell');
 var mkdirp = require('mkdirp');
@@ -67,7 +69,8 @@ var compilerMinimalist = webpack({
 });
 
 function minify(name) {
-  var result = uglify.minify([DIST + '/' + name + '.js'], {
+  let jsName = DIST+'/tmp' + '/' + name + '.js'
+  var result = uglify.minify(jsName, {
     outSourceMap: name + '.map',
     output: {
       comments: /@license/,
@@ -184,6 +187,11 @@ gulp.task('zip', shell.task([
 gulp.task('watch', ['bundle', 'bundle-css', 'copy-img'], function () {
   gulp.watch(['src/**/*'], ['bundle', 'bundle-css', 'copy-img']);
 });
+gulp.task('es6to5',function(){
+  return gulp.src('dist/**/*.js')
+    .pipe(babel())
+    .pipe(gulp.dest('dist/tmp'));
+})
 
 // The default task (called when you run `gulp`)
 gulp.task('default', [
@@ -192,6 +200,7 @@ gulp.task('default', [
   'bundle-css',
   'copy-img',
   'copy-docs',
+  'es6to5',
   'minify',
   'minify-minimalist'
 ]);

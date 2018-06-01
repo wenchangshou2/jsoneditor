@@ -25,7 +25,7 @@
  *
  * @author  Jos de Jong, <wjosdejong@gmail.com>
  * @version 5.16.0
- * @date    2018-05-23
+ * @date    2018-06-01
  */
 (function webpackUniversalModuleDefinition(root, factory) {
 	if(typeof exports === 'object' && typeof module === 'object')
@@ -84,7 +84,6 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
-
 	var Ajv;
 	try {
 	  Ajv = __webpack_require__(!(function webpackMissingModule() { var e = new Error("Cannot find module \"ajv\""); e.code = 'MODULE_NOT_FOUND'; throw e; }()));
@@ -92,9 +91,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	catch (err) {
 	  // no problem... when we need Ajv we will throw a neat exception
 	}
-
 	var treemode = __webpack_require__(1);
-	var textmode = __webpack_require__(16);
+	var textmode = __webpack_require__(17);
 	var util = __webpack_require__(4);
 
 	/**
@@ -174,9 +172,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	      var VALID_OPTIONS = [
 	        'ajv', 'schema', 'schemaRefs','templates',
 	        'ace', 'theme','autocomplete',
-	        'onChange', 'onEditable', 'onError', 'onModeChange', 'onSelectionChange', 'onTextSelectionChange',
-	        'escapeUnicode', 'history', 'search', 'mode', 'modes', 'name', 'indentation', 
-	        'sortObjectKeys', 'navigationBar', 'statusBar', 'languages', 'language'
+	        'onChange', 'onEditable', 'onError', 'onModeChange', 'onSelectionChange','onDuplicate','onRemoveNode', 'onTextSelectionChange',
+	        'onSetPath','onSetFilter','escapeUnicode', 'history', 'search', 'mode', 'modes', 'name', 'indentation', 
+	        'sortObjectKeys', 'navigationBar', 'statusBar', 'languages', 'language',"multiple","multipleField","filter","filters"
 	      ];
 
 	      Object.keys(options).forEach(function (option) {
@@ -208,6 +206,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @type { Object.<String, {mixin: Object, data: String} > }
 	 */
 	JSONEditor.modes = {};
+	JSONEditor.filters={};
 
 	// debounce interval for JSON schema vaidation in milliseconds
 	JSONEditor.prototype.DEBOUNCE_INTERVAL = 150;
@@ -225,6 +224,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  this.json = json || {};
 
 	  var mode = this.options.mode || (this.options.modes && this.options.modes[0]) || 'tree';
+	  var filter=this.options.filter||(this.options.filters&&this.options.filters[0])||'all';
+	  var multiple = this.options.multiple || 'false'
+	  var multipleField = this.options.multipleField || []
 	  this.setMode(mode);
 	};
 
@@ -337,6 +339,67 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 	  else {
 	    throw new Error('Unknown mode "' + options.mode + '"');
+	  }
+	};
+	/**
+	 * Change the mode of the editor.
+	 * JSONEditor will be extended with all methods needed for the chosen mode.
+	 * @param {String} mode     Available modes: 'tree' (default), 'view', 'form',
+	 *                          'text', and 'code'.
+	 */
+	JSONEditor.prototype.setFilter = function (filter) {
+	  var container = this.container;
+	  var options = util.extend({}, this.options);
+	  var oldFilter = options.filter;
+	  var data;
+	  var name;
+
+	  options.filter = filter;
+	  let config;
+	  for(let item of options.filter){
+	    if(item===filter){
+	      config=item
+	    }
+	  }
+	  // var config = options.filters[filter];
+	  if (config) {
+	    try {
+	      var asText = (config.data == 'text');
+	      name = this.getName();
+	      data = this[asText ? 'getText' : 'get'](); // get text or json
+
+	      this.destroy();
+	      util.clear(this);
+	      util.extend(this, config.mixin);
+	      this.create(container, options);
+
+	      this.setName(name);
+	      this[asText ? 'setText' : 'set'](data); // set text or json
+
+	      if (typeof config.load === 'function') {
+	        try {
+	          config.load.call(this);
+	        }
+	        catch (err) {
+	          console.error(err);
+	        }
+	      }
+
+	      if (typeof options.onFilterChange === 'function' && filter !== oldFilter) {
+	        try {
+	          // options.onModeChange(filter, oldFilter);
+	        }
+	        catch (err) {
+	          console.error(err);
+	        }
+	      }
+	    }
+	    catch (err) {
+	      this._onError(err);
+	    }
+	  }
+	  else {
+	    throw new Error('Unknown filter "' + options.filter + '"');
 	  }
 	};
 
@@ -505,8 +568,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	var TreePath = __webpack_require__(9);
 	var Node = __webpack_require__(10);
 	var ModeSwitcher = __webpack_require__(14);
+	var FilterSwitcher = __webpack_require__(15);
 	var util = __webpack_require__(4);
-	var autocomplete = __webpack_require__(15);
+	var autocomplete = __webpack_require__(16);
 	var translate = __webpack_require__(8).translate;
 	var setLanguages = __webpack_require__(8).setLanguages;
 	var setLanguage = __webpack_require__(8).setLanguage;
@@ -599,6 +663,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this.modeSwitcher.destroy();
 	    this.modeSwitcher = null;
 	  }
+	  if (this.filterSwitcher){
+	    this.filterSwitcher.destroy();
+	    this.filterSwitcher=null;
+	  }
 	};
 
 	/**
@@ -616,7 +684,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	    schemaRefs: null,
 	    autocomplete: null,
 	    navigationBar : true,
-	    onSelectionChange: null
+	    onSelectionChange: null,
+	    onSetPath: null,
+	    onDuplicate: null,
+	    onSetFilter: null,
+	    onRemoveNode:null,
 	  };
 
 	  // copy all options
@@ -636,6 +708,18 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  if (options.onSelectionChange) {
 	    this.onSelectionChange(options.onSelectionChange);
+	  }
+	  if(options.onSetPath){
+	    this.onSetPath(options.onSetPath)
+	  }
+	  if(options.onDuplicate){
+	    this.onDuplicate(options.onDuplicate)
+	  }
+	  if(options.onRemoveNode){
+	    this.onRemoveNode(options.onRemoveNode)
+	  }
+	  if(options.onSetFilter){
+	    this.onSetFilter(options.onSetFilter)
 	  }
 
 	  setLanguages(this.options.languages);
@@ -1174,6 +1258,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 	  this.frame.onclick = function (event) {
 	    var target = event.target;// || event.srcElement;
+	    console.log(target,event);
+	    
 
 	    onEvent(event);
 
@@ -1267,6 +1353,20 @@ return /******/ (function(modules) { // webpackBootstrap
 	      // switch mode and restore focus
 	      me.setMode(mode);
 	      me.modeSwitcher.focus();
+	    });
+	    this.filterSwitcher = new FilterSwitcher(this.menu, ["all","difference"], "all", function onSwitch(mode) {
+	      if(mode!='all'){
+	        me.deepData = me.getText();
+	      }else{
+	        me.setText(me.deepData);
+	      }
+	      if(me._setFilter){
+	        me._setFilter(mode);
+	      }
+	      // me.filterSwitcher.destroy();
+	      // me.setFilter(mode);
+	      // switch mode and restore focus
+	      // me.filterSwitcher.focus();
 	    });
 	  }
 
@@ -1385,6 +1485,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	    node.onEvent(event);
 	  }
 	};
+	treemode._removeNode = function (node,parent) {
+	  if (this._removeNode) {
+	    this._removeNode(node,parent);
+	  }
+	}
+	treemode._duplicateNode = function (node) {
+	  if (this._duplicate) {
+	    this._duplicate(node);
+	  }
+	}
 
 	/**
 	 * Update TreePath components
@@ -1396,6 +1506,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	    util.removeClassName(this.navBar, 'nav-bar-empty');
 	    
 	    var pathObjs = [];
+	    if (this._setPath) {
+	      let arr = []
+	      for (let i = 0; i < pathNodes.length; i++) {
+	        arr.push(getName(pathNodes[i]))
+	      }
+	      this._setPath(arr)
+	    }
 	    pathNodes.forEach(function (node) {
 	      var pathObj = {
 	        name: getName(node),
@@ -1901,6 +2018,26 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this._selectionChangedHandler = util.debounce(callback, this.DEBOUNCE_INTERVAL);
 	  }
 	};
+	treemode.onSetPath=function(callback){
+	  if (typeof callback==='function'){
+	    this._setPath = util.debounce(callback, this.DEBOUNCE_INTERVAL);
+	  }
+	}
+	treemode.onDuplicate=function(callback){
+	  if (typeof callback === 'function') {
+	    this._duplicate = util.debounce(callback, this.DEBOUNCE_INTERVAL);
+	  }
+	}
+	treemode.onRemoveNode=function(callback){
+	  if(typeof callback==='function'){
+	    this._removeNode = util.debounce(callback, this.DEBOUNCE_INTERVAL);
+	  }
+	}
+	treemode.onSetFilter=function(callback){
+	  if (typeof callback==='function'){
+	    this._setFilter = util.debounce(callback, this.DEBOUNCE_INTERVAL);
+	  }
+	}
 
 	/**
 	 * Select range of nodes.
@@ -4885,17 +5022,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	 *                          {String}  type  Can have values 'auto', 'array',
 	 *                                          'object', or 'string'.
 	 */
-	function Node (editor, params) {
+	function Node(editor, params) {
 	  /** @type {./treemode} */
 	  this.editor = editor;
 	  this.dom = {};
 	  this.expanded = false;
 
-	  if(params && (params instanceof Object)) {
+	  if (params && (params instanceof Object)) {
 	    this.setField(params.field, params.fieldEditable);
 	    this.setValue(params.value, params.type);
-	  }
-	  else {
+	  } else {
 	    this.setField('');
 	    this.setValue(null);
 	  }
@@ -4931,7 +5067,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this.editable.value = this.editor.options.mode !== 'view';
 
 	    if ((this.editor.options.mode === 'tree' || this.editor.options.mode === 'form') &&
-	        (typeof this.editor.options.onEditable === 'function')) {
+	      (typeof this.editor.options.onEditable === 'function')) {
 	      var editable = this.editor.options.onEditable({
 	        field: this.field,
 	        value: this.value,
@@ -4941,8 +5077,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      if (typeof editable === 'boolean') {
 	        this.editable.field = editable;
 	        this.editable.value = editable;
-	      }
-	      else {
+	      } else {
 	        if (typeof editable.field === 'boolean') this.editable.field = editable.field;
 	        if (typeof editable.value === 'boolean') this.editable.value = editable.value;
 	      }
@@ -4972,11 +5107,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @returns {String|Number}
 	 */
 	Node.prototype.getName = function () {
-	 return !this.parent
-	 ? undefined  // do not add an (optional) field name of the root node
-	 :  (this.parent.type != 'array')
-	     ? this.field
-	     : this.index;
+	  return !this.parent ?
+	    undefined // do not add an (optional) field name of the root node
+	    :
+	    (this.parent.type != 'array') ?
+	    this.field :
+	    this.index;
 	};
 
 	/**
@@ -4993,7 +5129,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  if (path.length && this.childs && this.childs.length) {
-	    for (var i=0; i < this.childs.length; ++i) {
+	    for (var i = 0; i < this.childs.length; ++i) {
 	      if (('' + path[0]) === ('' + this.childs[i].getName())) {
 	        return this.childs[i].findNodeByPath(path.slice(1));
 	      }
@@ -5029,8 +5165,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        throw new Error('Cannot get child node at index ' + prop + ': node is no array');
 	      }
 	      node = node.childs[prop];
-	    }
-	    else { // string
+	    } else { // string
 	      if (node.type !== 'object') {
 	        throw new Error('Cannot get child node ' + prop + ': node is no object');
 	      }
@@ -5078,7 +5213,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	/**
 	 * Render the error
 	 */
-	Node.prototype.updateError = function() {
+	Node.prototype.updateError = function () {
 	  var error = this.error;
 	  var tdError = this.dom.tdError;
 	  if (error && this.dom && this.dom.tr && !tdError) {
@@ -5135,8 +5270,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      tdError.removeChild(tdError.firstChild);
 	    }
 	    tdError.appendChild(button);
-	  }
-	  else {
+	  } else {
 	    if (tdError) {
 	      this.dom.tdError.parentNode.removeChild(this.dom.tdError);
 	      delete this.dom.tdError;
@@ -5157,7 +5291,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * Set parent node
 	 * @param {Node} parent
 	 */
-	Node.prototype.setParent = function(parent) {
+	Node.prototype.setParent = function (parent) {
 	  this.parent = parent;
 	};
 
@@ -5166,7 +5300,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @param {String}  field
 	 * @param {boolean} [fieldEditable]
 	 */
-	Node.prototype.setField = function(field, fieldEditable) {
+	Node.prototype.setField = function (field, fieldEditable) {
 	  this.field = field;
 	  this.previousField = field;
 	  this.fieldEditable = (fieldEditable === true);
@@ -5176,7 +5310,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * Get field
 	 * @return {String}
 	 */
-	Node.prototype.getField = function() {
+	Node.prototype.getField = function () {
 	  if (this.field === undefined) {
 	    this._getDomField();
 	  }
@@ -5190,7 +5324,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @param {String} [type]  Specify the type of the value. Can be 'auto',
 	 *                         'array', 'object', or 'string'
 	 */
-	Node.prototype.setValue = function(value, type) {
+	Node.prototype.setValue = function (value, type) {
 	  var childValue, child, visible;
 
 	  // first clear all current childs (if any)
@@ -5209,11 +5343,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	  if (type && type != this.type) {
 	    if (type == 'string' && this.type == 'auto') {
 	      this.type = type;
-	    }
-	    else {
+	    } else {
 	      throw new Error('Type mismatch: ' +
-	          'cannot cast value of type "' + this.type +
-	          ' to the specified type "' + type + '"');
+	        'cannot cast value of type "' + this.type +
+	        ' to the specified type "' + type + '"');
 	    }
 	  }
 
@@ -5232,8 +5365,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      }
 	    }
 	    this.value = '';
-	  }
-	  else if (this.type == 'object') {
+	  } else if (this.type == 'object') {
 	    // object
 	    this.childs = [];
 	    i = 0;
@@ -5258,8 +5390,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    if (this.editor.options.sortObjectKeys === true) {
 	      this.sort('asc');
 	    }
-	  }
-	  else {
+	  } else {
 	    // value
 	    this.childs = undefined;
 	    this.value = value;
@@ -5272,24 +5403,22 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * Get value. Value is a JSON structure
 	 * @return {*} value
 	 */
-	Node.prototype.getValue = function() {
+	Node.prototype.getValue = function () {
 	  //var childs, i, iMax;
 
 	  if (this.type == 'array') {
 	    var arr = [];
-	    this.childs.forEach (function (child) {
+	    this.childs.forEach(function (child) {
 	      arr.push(child.getValue());
 	    });
 	    return arr;
-	  }
-	  else if (this.type == 'object') {
+	  } else if (this.type == 'object') {
 	    var obj = {};
-	    this.childs.forEach (function (child) {
+	    this.childs.forEach(function (child) {
 	      obj[child.getField()] = child.getValue();
 	    });
 	    return obj;
-	  }
-	  else {
+	  } else {
 	    if (this.value === undefined) {
 	      this._getDomValue();
 	    }
@@ -5302,7 +5431,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * Get the nesting level of this node
 	 * @return {Number} level
 	 */
-	Node.prototype.getLevel = function() {
+	Node.prototype.getLevel = function () {
 	  return (this.parent ? this.parent.getLevel() + 1 : 0);
 	};
 
@@ -5322,7 +5451,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * not. The DOM elements are not cloned.
 	 * @return {Node} clone
 	 */
-	Node.prototype.clone = function() {
+	Node.prototype.clone = function () {
 	  var clone = new Node(this.editor);
 	  clone.type = this.type;
 	  clone.field = this.field;
@@ -5342,8 +5471,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      cloneChilds.push(childClone);
 	    });
 	    clone.childs = cloneChilds;
-	  }
-	  else {
+	  } else {
 	    // a value
 	    clone.childs = undefined;
 	  }
@@ -5356,7 +5484,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @param {boolean} [recurse] Optional recursion, true by default. When
 	 *                            true, all childs will be expanded recursively
 	 */
-	Node.prototype.expand = function(recurse) {
+	Node.prototype.expand = function (recurse) {
 	  if (!this.childs) {
 	    return;
 	  }
@@ -5381,7 +5509,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @param {boolean} [recurse] Optional recursion, true by default. When
 	 *                            true, all childs will be collapsed recursively
 	 */
-	Node.prototype.collapse = function(recurse) {
+	Node.prototype.collapse = function (recurse) {
 	  if (!this.childs) {
 	    return;
 	  }
@@ -5406,7 +5534,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	/**
 	 * Recursively show all childs when they are expanded
 	 */
-	Node.prototype.showChilds = function() {
+	Node.prototype.showChilds = function () {
 	  var childs = this.childs;
 	  if (!childs) {
 	    return;
@@ -5424,8 +5552,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      var nextTr = tr.nextSibling;
 	      if (nextTr) {
 	        table.insertBefore(append, nextTr);
-	      }
-	      else {
+	      } else {
 	        table.appendChild(append);
 	      }
 	    }
@@ -5451,7 +5578,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 	};
 
-	Node.prototype._getNextTr = function() {
+	Node.prototype._getNextTr = function () {
 	  if (this.showMore && this.showMore.getDom().parentNode) {
 	    return this.showMore.getDom();
 	  }
@@ -5465,7 +5592,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * Hide the node with all its childs
 	 * @param {{resetVisibleChilds: boolean}} [options]
 	 */
-	Node.prototype.hide = function(options) {
+	Node.prototype.hide = function (options) {
 	  var tr = this.dom.tr;
 	  var table = tr ? tr.parentNode : undefined;
 	  if (table) {
@@ -5479,7 +5606,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * Recursively hide all childs
 	 * @param {{resetVisibleChilds: boolean}} [options]
 	 */
-	Node.prototype.hideChilds = function(options) {
+	Node.prototype.hideChilds = function (options) {
 	  var childs = this.childs;
 	  if (!childs) {
 	    return;
@@ -5515,7 +5642,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	/**
 	 * Goes through the path from the node to the root and ensures that it is expanded
 	 */
-	Node.prototype.expandTo = function() {
+	Node.prototype.expandTo = function () {
 	  var currentNode = this.parent;
 	  while (currentNode) {
 	    if (!currentNode.expanded) {
@@ -5532,7 +5659,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @param {Node} node
 	 * @param {boolean} [visible] If true, the child will be rendered
 	 */
-	Node.prototype.appendChild = function(node, visible) {
+	Node.prototype.appendChild = function (node, visible) {
 	  if (this._hasChilds()) {
 	    // adjust the link to the parent
 	    node.setParent(this);
@@ -5556,8 +5683,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	      this.visibleChilds++;
 	    }
 
-	    this.updateDom({'updateIndexes': true});
-	    node.updateDom({'recurse': true});
+	    this.updateDom({
+	      'updateIndexes': true
+	    });
+	    node.updateDom({
+	      'recurse': true
+	    });
 	  }
 	};
 
@@ -5568,7 +5699,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @param {Node} node
 	 * @param {Node} beforeNode
 	 */
-	Node.prototype.moveBefore = function(node, beforeNode) {
+	Node.prototype.moveBefore = function (node, beforeNode) {
 	  if (this._hasChilds()) {
 	    // create a temporary row, to prevent the scroll position from jumping
 	    // when removing the node
@@ -5588,12 +5719,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	      if (this.childs.length + 1 > this.visibleChilds) {
 	        var lastVisibleNode = this.childs[this.visibleChilds - 1];
 	        this.insertBefore(node, lastVisibleNode);
-	      }
-	      else {
+	      } else {
 	        this.appendChild(node);
 	      }
-	    }
-	    else {
+	    } else {
 	      this.insertBefore(node, beforeNode);
 	    }
 
@@ -5630,7 +5759,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @param {Node} node
 	 * @param {Node} beforeNode
 	 */
-	Node.prototype.insertBefore = function(node, beforeNode) {
+	Node.prototype.insertBefore = function (node, beforeNode) {
 	  if (this._hasChilds()) {
 	    this.visibleChilds++;
 
@@ -5641,8 +5770,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      node.setParent(this);
 	      node.fieldEditable = (this.type == 'object');
 	      this.childs.push(node);
-	    }
-	    else {
+	    } else {
 	      // insert before a child node
 	      var index = this.childs.indexOf(beforeNode);
 	      if (index == -1) {
@@ -5668,8 +5796,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	      this.showChilds();
 	    }
 
-	    this.updateDom({'updateIndexes': true});
-	    node.updateDom({'recurse': true});
+	    this.updateDom({
+	      'updateIndexes': true
+	    });
+	    node.updateDom({
+	      'recurse': true
+	    });
 	  }
 	};
 
@@ -5679,14 +5811,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @param {Node} node
 	 * @param {Node} afterNode
 	 */
-	Node.prototype.insertAfter = function(node, afterNode) {
+	Node.prototype.insertAfter = function (node, afterNode) {
 	  if (this._hasChilds()) {
 	    var index = this.childs.indexOf(afterNode);
 	    var beforeNode = this.childs[index + 1];
 	    if (beforeNode) {
 	      this.insertBefore(node, beforeNode);
-	    }
-	    else {
+	    } else {
 	      this.appendChild(node);
 	    }
 	  }
@@ -5700,7 +5831,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 *                           used to count and limit the results whilst iterating
 	 * @return {Node[]} results  Array with nodes containing the search text
 	 */
-	Node.prototype.search = function(text, results) {
+	Node.prototype.search = function (text, results) {
 	  if (!Array.isArray(results)) {
 	    results = [];
 	  }
@@ -5737,10 +5868,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	        child.search(text, results);
 	      });
 	    }
-	  }
-	  else {
+	  } else {
 	    // string, auto
-	    if (this.value !== undefined  && results.length <= this.MAX_SEARCH_RESULTS) {
+	    if (this.value !== undefined && results.length <= this.MAX_SEARCH_RESULTS) {
 	      var value = String(this.value).toLowerCase();
 	      index = value.indexOf(search);
 	      if (index !== -1) {
@@ -5764,7 +5894,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * The node will not get the focus
 	 * @param {function(boolean)} [callback]
 	 */
-	Node.prototype.scrollTo = function(callback) {
+	Node.prototype.scrollTo = function (callback) {
 	  this.expandPathToNode();
 
 	  if (this.dom.tr && this.dom.tr.parentNode) {
@@ -5780,9 +5910,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var recurse = false;
 	  while (node && node.parent) {
 	    // expand visible childs of the parent if needed
-	    var index = node.parent.type === 'array'
-	        ? node.index
-	        : node.parent.childs.indexOf(node);
+	    var index = node.parent.type === 'array' ?
+	      node.index :
+	      node.parent.childs.indexOf(node);
 	    while (node.parent.visibleChilds < index + 1) {
 	      node.parent.visibleChilds += Node.prototype.MAX_VISIBLE_CHILDS;
 	    }
@@ -5803,7 +5933,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 *                                focus available values: 'drag', 'menu',
 	 *                                'expand', 'field', 'value' (default)
 	 */
-	Node.prototype.focus = function(elementName) {
+	Node.prototype.focus = function (elementName) {
 	  Node.focusElement = elementName;
 
 	  if (this.dom.tr && this.dom.tr.parentNode) {
@@ -5813,8 +5943,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      case 'drag':
 	        if (dom.drag) {
 	          dom.drag.focus();
-	        }
-	        else {
+	        } else {
 	          dom.menu.focus();
 	        }
 	        break;
@@ -5826,16 +5955,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	      case 'expand':
 	        if (this._hasChilds()) {
 	          dom.expand.focus();
-	        }
-	        else if (dom.field && this.fieldEditable) {
+	        } else if (dom.field && this.fieldEditable) {
 	          dom.field.focus();
 	          util.selectContentEditable(dom.field);
-	        }
-	        else if (dom.value && !this._hasChilds()) {
+	        } else if (dom.value && !this._hasChilds()) {
 	          dom.value.focus();
 	          util.selectContentEditable(dom.value);
-	        }
-	        else {
+	        } else {
 	          dom.menu.focus();
 	        }
 	        break;
@@ -5844,15 +5970,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	        if (dom.field && this.fieldEditable) {
 	          dom.field.focus();
 	          util.selectContentEditable(dom.field);
-	        }
-	        else if (dom.value && !this._hasChilds()) {
+	        } else if (dom.value && !this._hasChilds()) {
 	          dom.value.focus();
 	          util.selectContentEditable(dom.value);
-	        }
-	        else if (this._hasChilds()) {
+	        } else if (this._hasChilds()) {
 	          dom.expand.focus();
-	        }
-	        else {
+	        } else {
 	          dom.menu.focus();
 	        }
 	        break;
@@ -5862,19 +5985,15 @@ return /******/ (function(modules) { // webpackBootstrap
 	        if (dom.select) {
 	          // enum select box
 	          dom.select.focus();
-	        }
-	        else if (dom.value && !this._hasChilds()) {
+	        } else if (dom.value && !this._hasChilds()) {
 	          dom.value.focus();
 	          util.selectContentEditable(dom.value);
-	        }
-	        else if (dom.field && this.fieldEditable) {
+	        } else if (dom.field && this.fieldEditable) {
 	          dom.field.focus();
 	          util.selectContentEditable(dom.field);
-	        }
-	        else if (this._hasChilds()) {
+	        } else if (this._hasChilds()) {
 	          dom.expand.focus();
-	        }
-	        else {
+	        } else {
 	          dom.menu.focus();
 	        }
 	        break;
@@ -5886,7 +6005,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * Select all text in an editable div after a delay of 0 ms
 	 * @param {Element} editableDiv
 	 */
-	Node.select = function(editableDiv) {
+	Node.select = function (editableDiv) {
 	  setTimeout(function () {
 	    util.selectContentEditable(editableDiv);
 	  }, 0);
@@ -5895,7 +6014,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	/**
 	 * Update the values from the DOM field and value of this node
 	 */
-	Node.prototype.blur = function() {
+	Node.prototype.blur = function () {
 	  // retrieve the actual field and value from the DOM.
 	  this._getDomValue(false);
 	  this._getDomField(false);
@@ -5907,7 +6026,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @param {Node} node
 	 * @return {boolean} containsNode
 	 */
-	Node.prototype.containsNode = function(node) {
+	Node.prototype.containsNode = function (node) {
 	  if (this == node) {
 	    return true;
 	  }
@@ -5933,7 +6052,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 *                                         the node is appended at the end
 	 * @private
 	 */
-	Node.prototype._move = function(node, beforeNode) {
+	Node.prototype._move = function (node, beforeNode) {
 	  if (node == beforeNode) {
 	    // nothing to do...
 	    return;
@@ -5956,8 +6075,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  // insert or append the node
 	  if (beforeNode) {
 	    this.insertBefore(clone, beforeNode);
-	  }
-	  else {
+	  } else {
 	    this.appendChild(clone);
 	  }
 
@@ -5974,7 +6092,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @return {Node | undefined} node  The removed node on success,
 	 *                                             else undefined
 	 */
-	Node.prototype.removeChild = function(node) {
+	Node.prototype.removeChild = function (node) {
 	  if (this.childs) {
 	    var index = this.childs.indexOf(node);
 
@@ -5990,7 +6108,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	      var removedNode = this.childs.splice(index, 1)[0];
 	      removedNode.parent = null;
 
-	      this.updateDom({'updateIndexes': true});
+	      this.updateDom({
+	        'updateIndexes': true
+	      });
 
 	      return removedNode;
 	    }
@@ -6023,24 +6143,24 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  if ((newType == 'string' || newType == 'auto') &&
-	      (oldType == 'string' || oldType == 'auto')) {
+	    (oldType == 'string' || oldType == 'auto')) {
 	    // this is an easy change
 	    this.type = newType;
-	  }
-	  else {
+	  } else {
 	    // change from array to object, or from string/auto to object/array
 	    var table = this.dom.tr ? this.dom.tr.parentNode : undefined;
 	    var lastTr;
 	    if (this.expanded) {
 	      lastTr = this.getAppendDom();
-	    }
-	    else {
+	    } else {
 	      lastTr = this.getDom();
 	    }
 	    var nextTr = (lastTr && lastTr.parentNode) ? lastTr.nextSibling : undefined;
 
 	    // hide current field and all its childs
-	    this.hide({ resetVisibleChilds: false });
+	    this.hide({
+	      resetVisibleChilds: false
+	    });
 	    this.clearDom();
 
 	    // adjust the field and the value
@@ -6064,8 +6184,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      if (oldType == 'string' || oldType == 'auto') {
 	        this.expanded = true;
 	      }
-	    }
-	    else if (newType == 'array') {
+	    } else if (newType == 'array') {
 	      if (!this.childs) {
 	        this.childs = [];
 	      }
@@ -6079,8 +6198,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      if (oldType == 'string' || oldType == 'auto') {
 	        this.expanded = true;
 	      }
-	    }
-	    else {
+	    } else {
 	      this.expanded = false;
 	    }
 
@@ -6088,8 +6206,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    if (table) {
 	      if (nextTr) {
 	        table.insertBefore(this.getDom(), nextTr);
-	      }
-	      else {
+	      } else {
 	        table.appendChild(this.getDom());
 	      }
 	    }
@@ -6100,15 +6217,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	    // cast value to the correct type
 	    if (newType == 'string') {
 	      this.value = String(this.value);
-	    }
-	    else {
+	    } else {
 	      this.value = this._stringCast(String(this.value));
 	    }
 
 	    this.focus();
 	  }
 
-	  this.updateDom({'updateIndexes': true});
+	  this.updateDom({
+	    'updateIndexes': true
+	  });
 	};
 
 	/**
@@ -6117,7 +6235,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 *                            case of invalid data
 	 * @private
 	 */
-	Node.prototype._getDomValue = function(silent) {
+	Node.prototype._getDomValue = function (silent) {
 	  if (this.dom.value && this.type != 'array' && this.type != 'object') {
 	    this.valueInnerText = util.getInnerText(this.dom.value);
 	  }
@@ -6128,8 +6246,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      var value;
 	      if (this.type == 'string') {
 	        value = this._unescapeHTML(this.valueInnerText);
-	      }
-	      else {
+	      } else {
 	        var str = this._unescapeHTML(this.valueInnerText);
 	        value = this._stringCast(str);
 	      }
@@ -6137,8 +6254,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        this.value = value;
 	        this._debouncedOnChangeValue();
 	      }
-	    }
-	    catch (err) {
+	    } catch (err) {
 	      this.value = undefined;
 	      // TODO: sent an action with the new, invalid value?
 	      if (silent !== true) {
@@ -6253,11 +6369,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	    if (type == 'array' || type == 'object') {
 	      var count = this.childs ? this.childs.length : 0;
 	      domValue.title = this.type + ' containing ' + count + ' items';
-	    }
-	    else if (isUrl && this.editable.value) {
+	    } else if (isUrl && this.editable.value) {
 	      domValue.title = translate('openUrl');
-	    }
-	    else {
+	    } else {
 	      domValue.title = '';
 	    }
 
@@ -6274,8 +6388,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      }
 
 	      this.dom.checkbox.checked = this.value;
-	    }
-	    else {
+	    } else {
 	      // cleanup checkbox when displayed
 	      if (this.dom.tdCheckbox) {
 	        this.dom.tdCheckbox.parentNode.removeChild(this.dom.tdCheckbox);
@@ -6299,11 +6412,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	        this.dom.select.appendChild(this.dom.select.option);
 
 	        //Iterate all enum values and add them as options
-	        for(var i = 0; i < this.enum.length; i++) {
+	        for (var i = 0; i < this.enum.length; i++) {
 	          this.dom.select.option = document.createElement('option');
 	          this.dom.select.option.value = this.enum[i];
 	          this.dom.select.option.innerHTML = this.enum[i];
-	          if(this.dom.select.option.value == this.value){
+	          if (this.dom.select.option.value == this.value) {
 	            this.dom.select.option.selected = true;
 	          }
 	          this.dom.select.appendChild(this.dom.select.option);
@@ -6317,19 +6430,16 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	      // If the enum is inside a composite type display
 	      // both the simple input and the dropdown field
-	      if(this.schema && (
-	          !this.schema.hasOwnProperty("oneOf") &&
+	      if (this.schema && (!this.schema.hasOwnProperty("oneOf") &&
 	          !this.schema.hasOwnProperty("anyOf") &&
-	          !this.schema.hasOwnProperty("allOf"))
-	      ) {
+	          !this.schema.hasOwnProperty("allOf"))) {
 	        this.valueFieldHTML = this.dom.tdValue.innerHTML;
 	        this.dom.tdValue.style.visibility = 'hidden';
 	        this.dom.tdValue.innerHTML = '';
 	      } else {
 	        delete this.valueFieldHTML;
 	      }
-	    }
-	    else {
+	    } else {
 	      // cleanup select box when displayed
 	      if (this.dom.tdSelect) {
 	        this.dom.tdSelect.parentNode.removeChild(this.dom.tdSelect);
@@ -6360,22 +6470,19 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var isEmpty = (String(this.field) == '' && this.parent.type != 'array');
 	    if (isEmpty) {
 	      util.addClassName(domField, 'jsoneditor-empty');
-	    }
-	    else {
+	    } else {
 	      util.removeClassName(domField, 'jsoneditor-empty');
 	    }
 
 	    // highlight when there is a search result
 	    if (this.searchFieldActive) {
 	      util.addClassName(domField, 'jsoneditor-highlight-active');
-	    }
-	    else {
+	    } else {
 	      util.removeClassName(domField, 'jsoneditor-highlight-active');
 	    }
 	    if (this.searchField) {
 	      util.addClassName(domField, 'jsoneditor-highlight');
-	    }
-	    else {
+	    } else {
 	      util.removeClassName(domField, 'jsoneditor-highlight');
 	    }
 
@@ -6390,7 +6497,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 *                            case of invalid data
 	 * @private
 	 */
-	Node.prototype._getDomField = function(silent) {
+	Node.prototype._getDomField = function (silent) {
 	  if (this.dom.field && this.fieldEditable) {
 	    this.fieldInnerText = util.getInnerText(this.dom.field);
 	  }
@@ -6403,8 +6510,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        this.field = field;
 	        this._debouncedOnChangeField();
 	      }
-	    }
-	    catch (err) {
+	    } catch (err) {
 	      this.field = undefined;
 	      // TODO: sent an action here, with the new, invalid value?
 	      if (silent !== true) {
@@ -6435,17 +6541,17 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	    if (duplicateKeys.length > 0) {
 	      errors = this.childs
-	          .filter(function (node) {
-	            return duplicateKeys.indexOf(node.field) !== -1;
-	          })
-	          .map(function (node) {
-	            return {
-	              node: node,
-	              error: {
-	                message: translate('duplicateKey') + ' "' + node.field + '"'
-	              }
+	        .filter(function (node) {
+	          return duplicateKeys.indexOf(node.field) !== -1;
+	        })
+	        .map(function (node) {
+	          return {
+	            node: node,
+	            error: {
+	              message: translate('duplicateKey') + ' "' + node.field + '"'
 	            }
-	          });
+	          }
+	        });
 	    }
 	  }
 
@@ -6465,12 +6571,20 @@ return /******/ (function(modules) { // webpackBootstrap
 	/**
 	 * Clear the dom of the node
 	 */
-	Node.prototype.clearDom = function() {
+	Node.prototype.clearDom = function () {
 	  // TODO: hide the node first?
 	  //this.hide();
 	  // TODO: recursively clear dom?
 
 	  this.dom = {};
+	};
+	Node.prototype.isInArray = function (arr, value) {
+	  for (var i = 0; i < arr.length; i++) {
+	    if (value === arr[i]) {
+	      return true;
+	    }
+	  }
+	  return false;
 	};
 
 	/**
@@ -6478,7 +6592,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * The dom will be generated when not yet created
 	 * @return {Element} tr    HTML DOM TR Element
 	 */
-	Node.prototype.getDom = function() {
+	Node.prototype.getDom = function () {
 	  var dom = this.dom;
 	  if (dom.tr) {
 	    return dom.tr;
@@ -6504,7 +6618,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	      }
 	    }
 	    dom.tr.appendChild(tdDrag);
-
 	    // create context menu
 	    var tdMenu = document.createElement('td');
 	    var menu = document.createElement('button');
@@ -6514,6 +6627,43 @@ return /******/ (function(modules) { // webpackBootstrap
 	    menu.title = translate('actionsMenu');
 	    tdMenu.appendChild(dom.menu);
 	    dom.tr.appendChild(tdMenu);
+
+	    if (this.editor.options.multiple && this.editor.options.mode === "tree" && (this.isInArray(this.editor.options.multipleField,this.field)) || (
+	        this.field === undefined && this.parent != undefined && (this.isInArray(this.editor.options.multipleField,this.parent.field))
+	      )) {
+	      if (this.editable.field && this.editor.options.multiple) {
+	        var tdMulti = document.createElement('td');
+	        let domSelect = document.createElement('input');
+	        if(this.editor.field===undefined){
+	          tdMulti.style.marginLeft='20px';
+	        }
+	        let name = "";
+	        if (this.field == undefined) {
+	          name = this.parent.field + "-" + this.index;
+	        } else {
+	          name = this.field;
+	        }
+	        domSelect.type = "checkbox";
+	        domSelect.className = "selectItem";
+	        domSelect.onchange = function (e) {
+	          if ($) {
+	            let items = $('.selectItem');
+	            for (let item of items) {
+	              if (item.name.startsWith(this.name + '-')) {
+	                $(item).prop('checked', this.checked);
+	              }
+	            }
+	          }
+	        }
+	        domSelect.name = name;
+	        tdMulti.appendChild(domSelect);
+	        dom.tr.appendChild(tdMulti);
+
+	      }
+	    }else{
+	      let tdTmp=document.createElement('td');
+	      dom.tr.appendChild(tdTmp);
+	    }
 	  }
 
 	  // create tree and field
@@ -6522,7 +6672,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  dom.tree = this._createDomTree();
 	  tdField.appendChild(dom.tree);
 
-	  this.updateDom({'updateIndexes': true});
+	  this.updateDom({
+	    'updateIndexes': true
+	  });
 
 	  return dom.tr;
 	};
@@ -6565,7 +6717,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  if (!editor.mouseup) {
-	    editor.mouseup = util.addEventListener(window, 'mouseup',function (event ) {
+	    editor.mouseup = util.addEventListener(window, 'mouseup', function (event) {
 	      Node.onDragEnd(nodes, event);
 	    });
 	  }
@@ -6652,8 +6804,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      });
 	      moved = true;
 	    }
-	  }
-	  else {
+	  } else {
 	    // move down
 	    var lastNode = nodes[nodes.length - 1];
 	    trLast = (lastNode.expanded && lastNode.append) ? lastNode.append.getDom() : lastNode.dom.tr;
@@ -6665,12 +6816,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	        nodeNext = Node.getNodeFromTarget(trNext);
 	        if (trNext) {
 	          bottomNext = trNext.nextSibling ?
-	              util.getAbsoluteTop(trNext.nextSibling) : 0;
+	            util.getAbsoluteTop(trNext.nextSibling) : 0;
 	          heightNext = trNext ? (bottomNext - topFirst) : 0;
 
 	          if (nodeNext &&
-	              nodeNext.parent.childs.length == nodes.length &&
-	              nodeNext.parent.childs[nodes.length - 1] == lastNode) {
+	            nodeNext.parent.childs.length == nodes.length &&
+	            nodeNext.parent.childs[nodes.length - 1] == lastNode) {
 	            // We are about to remove the last child of this parent,
 	            // which will make the parents appendNode visible.
 	            topThis += 27;
@@ -6687,7 +6838,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        var diffX = (mouseX - editor.drag.mouseX);
 	        var diffLevel = Math.round(diffX / 24 / 2);
 	        var level = editor.drag.level + diffLevel; // desired level
-	        var levelNext = nodeNext.getLevel();     // level to be
+	        var levelNext = nodeNext.getLevel(); // level to be
 
 	        // find the best fitting level (move upwards over the append nodes)
 	        trPrev = nodeNext.dom.tr && nodeNext.dom.tr.previousSibling;
@@ -6700,8 +6851,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	          if (isDraggedNode) {
 	            // neglect the dragged nodes themselves and their childs
-	          }
-	          else if (nodePrev instanceof AppendNode) {
+	          } else if (nodePrev instanceof AppendNode) {
 	            var childs = nodePrev.parent.childs;
 	            if (childs.length != nodes.length || childs[nodes.length - 1] != lastNode) {
 	              // non-visible append node of a list of childs
@@ -6710,12 +6860,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	              // text when removing this node).
 	              nodeNext = Node.getNodeFromTarget(trPrev);
 	              levelNext = nodeNext.getLevel();
-	            }
-	            else {
+	            } else {
 	              break;
 	            }
-	          }
-	          else {
+	          } else {
 	            break;
 	          }
 
@@ -6723,7 +6871,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        }
 
 	        if (nodeNext instanceof AppendNode && !nodeNext.isVisible() &&
-	            nodeNext.parent.showMore.isVisible()) {
+	          nodeNext.parent.showMore.isVisible()) {
 	          nodeNext = nodeNext._nextNode();
 	        }
 
@@ -6847,8 +6995,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  if (this.dom.tr) {
 	    if (highlight) {
 	      util.addClassName(this.dom.tr, 'jsoneditor-highlight');
-	    }
-	    else {
+	    } else {
 	      util.removeClassName(this.dom.tr, 'jsoneditor-highlight');
 	    }
 
@@ -6875,15 +7022,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	  if (this.dom.tr) {
 	    if (selected) {
 	      util.addClassName(this.dom.tr, 'jsoneditor-selected');
-	    }
-	    else {
+	    } else {
 	      util.removeClassName(this.dom.tr, 'jsoneditor-selected');
 	    }
 
 	    if (isFirst) {
 	      util.addClassName(this.dom.tr, 'jsoneditor-first');
-	    }
-	    else {
+	    } else {
 	      util.removeClassName(this.dom.tr, 'jsoneditor-first');
 	    }
 
@@ -6947,8 +7092,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      domField.contentEditable = this.editable.field;
 	      domField.spellcheck = false;
 	      domField.className = 'jsoneditor-field';
-	    }
-	    else {
+	    } else {
 	      // parent is an array this is the root node
 	      domField.className = 'jsoneditor-readonly';
 	    }
@@ -6956,14 +7100,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var fieldText;
 	    if (this.index != undefined) {
 	      fieldText = this.index;
-	    }
-	    else if (this.field != undefined) {
+	    } else if (this.field != undefined) {
 	      fieldText = this.field;
-	    }
-	    else if (this._hasChilds()) {
+	    } else if (this._hasChilds()) {
 	      fieldText = this.type;
-	    }
-	    else {
+	    } else {
 	      fieldText = '';
 	    }
 	    domField.innerHTML = this._escapeHTML(fieldText);
@@ -6978,12 +7119,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	    if (this.type == 'array') {
 	      domValue.innerHTML = '[' + count + ']';
 	      util.addClassName(this.dom.tr, 'jsoneditor-expandable');
-	    }
-	    else if (this.type == 'object') {
+	    } else if (this.type == 'object') {
 	      domValue.innerHTML = '{' + count + '}';
 	      util.addClassName(this.dom.tr, 'jsoneditor-expandable');
-	    }
-	    else {
+	    } else {
 	      domValue.innerHTML = this._escapeHTML(this.value);
 	      util.removeClassName(this.dom.tr, 'jsoneditor-expandable');
 	    }
@@ -7010,7 +7149,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  // update rendering of error
 	  if (this.error) {
-	    this.updateError()
+	    this.updateError();
 	  }
 
 	  // update row with append button
@@ -7030,15 +7169,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 	Node.prototype._updateSchema = function () {
 	  //Locating the schema of the node and checking for any enum type
-	  if(this.editor && this.editor.options) {
+	  if (this.editor && this.editor.options) {
 	    // find the part of the json schema matching this nodes path
-	    this.schema = this.editor.options.schema 
-	        ? Node._findSchema(this.editor.options.schema, this.getPath())
-	        : null;
+	    this.schema = this.editor.options.schema ?
+	      Node._findSchema(this.editor.options.schema, this.getPath()) :
+	      null;
 	    if (this.schema) {
 	      this.enum = Node._findEnum(this.schema);
-	    }
-	    else {
+	    } else {
 	      delete this.enum;
 	    }
 	  }
@@ -7058,7 +7196,9 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  var composite = schema.oneOf || schema.anyOf || schema.allOf;
 	  if (composite) {
-	    var match = composite.filter(function (entry) {return entry.enum});
+	    var match = composite.filter(function (entry) {
+	      return entry.enum
+	    });
 	    if (match.length > 0) {
 	      return match[0].enum;
 	    }
@@ -7093,20 +7233,17 @@ return /******/ (function(modules) { // webpackBootstrap
 	        for (var prop in childSchema.patternProperties) {
 	          foundSchema = Node._findSchema(childSchema.patternProperties[prop], path.slice(i, path.length));
 	        }
-	      }
-	      else if (childSchema.items && childSchema.items.properties) {
+	      } else if (childSchema.items && childSchema.items.properties) {
 	        childSchema = childSchema.items.properties[key];
 	        if (childSchema) {
 	          foundSchema = Node._findSchema(childSchema, path.slice(i, path.length));
 	        }
-	      }
-	      else if (typeof key === 'string' && childSchema.properties) {
+	      } else if (typeof key === 'string' && childSchema.properties) {
 	        childSchema = childSchema.properties[key] || null;
 	        if (childSchema) {
 	          foundSchema = Node._findSchema(childSchema, path.slice(i, path.length));
 	        }
-	      }
-	      else if (typeof key === 'number' && childSchema.items) {
+	      } else if (typeof key === 'number' && childSchema.items) {
 	        childSchema = childSchema.items;
 	        if (childSchema) {
 	          foundSchema = Node._findSchema(childSchema, path.slice(i, path.length));
@@ -7136,8 +7273,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	          childField.innerHTML = index;
 	        }
 	      });
-	    }
-	    else if (this.type == 'object') {
+	    } else if (this.type == 'object') {
 	      childs.forEach(function (child) {
 	        if (child.index != undefined) {
 	          delete child.index;
@@ -7161,19 +7297,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	  if (this.type == 'array') {
 	    domValue = document.createElement('div');
 	    domValue.innerHTML = '[...]';
-	  }
-	  else if (this.type == 'object') {
+	  } else if (this.type == 'object') {
 	    domValue = document.createElement('div');
 	    domValue.innerHTML = '{...}';
-	  }
-	  else {
+	  } else {
 	    if (!this.editable.value && util.isUrl(this.value)) {
 	      // create a link in case of read-only editor and value containing an url
 	      domValue = document.createElement('a');
 	      domValue.href = this.value;
 	      domValue.innerHTML = this._escapeHTML(this.value);
-	    }
-	    else {
+	    } else {
 	      // create an editable or read-only div
 	      domValue = document.createElement('div');
 	      domValue.contentEditable = this.editable.value;
@@ -7197,8 +7330,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  if (this._hasChilds()) {
 	    expand.className = this.expanded ? 'jsoneditor-expanded' : 'jsoneditor-collapsed';
 	    expand.title = translate('expandTitle');
-	  }
-	  else {
+	  } else {
 	    expand.className = 'jsoneditor-invisible';
 	    expand.title = '';
 	  }
@@ -7247,7 +7379,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	    tdSeparator.className = 'jsoneditor-separator';
 	  }
 	  dom.tdSeparator = tdSeparator;
-
 	  // create the value
 	  var tdValue = document.createElement('td');
 	  tdValue.className = 'jsoneditor-tree';
@@ -7265,18 +7396,17 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 	Node.prototype.onEvent = function (event) {
 	  var type = event.type,
-	      target = event.target || event.srcElement,
-	      dom = this.dom,
-	      node = this,
-	      expandable = this._hasChilds();
+	    target = event.target || event.srcElement,
+	    dom = this.dom,
+	    node = this,
+	    expandable = this._hasChilds();
 
 	  // check if mouse is on menu or on dragarea.
 	  // If so, highlight current row and its childs
 	  if (target == dom.drag || target == dom.menu) {
 	    if (type == 'mouseover') {
 	      this.editor.highlighter.highlight(this);
-	    }
-	    else if (type == 'mouseout') {
+	    } else if (type == 'mouseout') {
 	      this.editor.highlighter.unhighlight();
 	    }
 	  }
@@ -7297,7 +7427,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  // expand events
 	  if (type == 'click') {
 	    if (target == dom.expand ||
-	        ((node.editor.options.mode === 'view' || node.editor.options.mode === 'form') && target.nodeName === 'DIV')) {
+	      ((node.editor.options.mode === 'view' || node.editor.options.mode === 'form') && target.nodeName === 'DIV')) {
 	      if (expandable) {
 	        var recurse = event.ctrlKey; // with ctrl-key, expand/collapse all
 	        this._onExpand(recurse);
@@ -7340,7 +7470,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	      case 'keydown':
 	      case 'mousedown':
-	          // TODO: cleanup
+	        // TODO: cleanup
 	        this.editor.selection = this.editor.getDomSelection();
 	        break;
 
@@ -7415,16 +7545,15 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var domTree = dom.tree;
 	  if (domTree && target == domTree.parentNode && type == 'click' && !event.hasMoved) {
 	    var left = (event.offsetX != undefined) ?
-	        (event.offsetX < (this.getLevel() + 1) * 24) :
-	        (event.pageX < util.getAbsoluteLeft(dom.tdSeparator));// for FF
+	      (event.offsetX < (this.getLevel() + 1) * 24) :
+	      (event.pageX < util.getAbsoluteLeft(dom.tdSeparator)); // for FF
 	    if (left || expandable) {
 	      // node is expandable when it is an object or array
 	      if (domField) {
 	        util.setEndOfContentEditable(domField);
 	        domField.focus();
 	      }
-	    }
-	    else {
+	    } else {
 	      if (domValue && !this.enum) {
 	        util.setEndOfContentEditable(domValue);
 	        domValue.focus();
@@ -7432,7 +7561,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }
 	  }
 	  if (((target == dom.tdExpand && !expandable) || target == dom.tdField || target == dom.tdSeparator) &&
-	      (type == 'click' && !event.hasMoved)) {
+	    (type == 'click' && !event.hasMoved)) {
 	    if (domField) {
 	      util.setEndOfContentEditable(domField);
 	      domField.focus();
@@ -7461,9 +7590,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var oldBeforeNode;
 	  var nodes;
 	  var multiselection;
-	  var selectedNodes = this.editor.multiselection.nodes.length > 0
-	      ? this.editor.multiselection.nodes
-	      : [this];
+	  var selectedNodes = this.editor.multiselection.nodes.length > 0 ?
+	    this.editor.multiselection.nodes :
+	    [this];
 	  var firstNode = selectedNodes[0];
 	  var lastNode = selectedNodes[selectedNodes.length - 1];
 
@@ -7476,8 +7605,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	          handled = true;
 	        }
 	      }
-	    }
-	    else if (target == this.dom.expand) {
+	    } else if (target == this.dom.expand) {
 	      var expandable = this._hasChilds();
 	      if (expandable) {
 	        var recurse = event.ctrlKey; // with ctrl-key, expand/collapse all
@@ -7486,43 +7614,36 @@ return /******/ (function(modules) { // webpackBootstrap
 	        handled = true;
 	      }
 	    }
-	  }
-	  else if (keynum == 68) {  // D
-	    if (ctrlKey && editable) {   // Ctrl+D
+	  } else if (keynum == 68) { // D
+	    if (ctrlKey && editable) { // Ctrl+D
 	      Node.onDuplicate(selectedNodes);
 	      handled = true;
 	    }
-	  }
-	  else if (keynum == 69) { // E
-	    if (ctrlKey) {       // Ctrl+E and Ctrl+Shift+E
-	      this._onExpand(shiftKey);  // recurse = shiftKey
+	  } else if (keynum == 69) { // E
+	    if (ctrlKey) { // Ctrl+E and Ctrl+Shift+E
+	      this._onExpand(shiftKey); // recurse = shiftKey
 	      target.focus(); // TODO: should restore focus in case of recursing expand (which takes DOM offline)
 	      handled = true;
 	    }
-	  }
-	  else if (keynum == 77 && editable) { // M
+	  } else if (keynum == 77 && editable) { // M
 	    if (ctrlKey) { // Ctrl+M
 	      this.showContextMenu(target);
 	      handled = true;
 	    }
-	  }
-	  else if (keynum == 46 && editable) { // Del
-	    if (ctrlKey) {       // Ctrl+Del
+	  } else if (keynum == 46 && editable) { // Del
+	    if (ctrlKey) { // Ctrl+Del
 	      Node.onRemove(selectedNodes);
 	      handled = true;
 	    }
-	  }
-	  else if (keynum == 45 && editable) { // Ins
-	    if (ctrlKey && !shiftKey) {       // Ctrl+Ins
+	  } else if (keynum == 45 && editable) { // Ins
+	    if (ctrlKey && !shiftKey) { // Ctrl+Ins
 	      this._onInsertBefore();
 	      handled = true;
-	    }
-	    else if (ctrlKey && shiftKey) {   // Ctrl+Shift+Ins
+	    } else if (ctrlKey && shiftKey) { // Ctrl+Shift+Ins
 	      this._onInsertAfter();
 	      handled = true;
 	    }
-	  }
-	  else if (keynum == 35) { // End
+	  } else if (keynum == 35) { // End
 	    if (altKey) { // Alt+End
 	      // find the last node
 	      var endNode = this._lastNode();
@@ -7531,8 +7652,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      }
 	      handled = true;
 	    }
-	  }
-	  else if (keynum == 36) { // Home
+	  } else if (keynum == 36) { // Home
 	    if (altKey) { // Alt+Home
 	      // find the first node
 	      var homeNode = this._firstNode();
@@ -7541,22 +7661,19 @@ return /******/ (function(modules) { // webpackBootstrap
 	      }
 	      handled = true;
 	    }
-	  }
-	  else if (keynum == 37) {        // Arrow Left
-	    if (altKey && !shiftKey) {  // Alt + Arrow Left
+	  } else if (keynum == 37) { // Arrow Left
+	    if (altKey && !shiftKey) { // Alt + Arrow Left
 	      // move to left element
 	      var prevElement = this._previousElement(target);
 	      if (prevElement) {
 	        this.focus(this._getElementName(prevElement));
 	      }
 	      handled = true;
-	    }
-	    else if (altKey && shiftKey && editable) { // Alt + Shift + Arrow left
+	    } else if (altKey && shiftKey && editable) { // Alt + Shift + Arrow left
 	      if (lastNode.expanded) {
 	        var appendDom = lastNode.getAppendDom();
 	        nextDom = appendDom ? appendDom.nextSibling : undefined;
-	      }
-	      else {
+	      } else {
 	        var dom = lastNode.getDom();
 	        nextDom = dom.nextSibling;
 	      }
@@ -7565,8 +7682,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	        nextDom2 = nextDom.nextSibling;
 	        nextNode2 = Node.getNodeFromTarget(nextDom2);
 	        if (nextNode && nextNode instanceof AppendNode &&
-	            !(lastNode.parent.childs.length == 1) &&
-	            nextNode2 && nextNode2.parent) {
+	          !(lastNode.parent.childs.length == 1) &&
+	          nextNode2 && nextNode2.parent) {
 	          oldSelection = this.editor.getDomSelection();
 	          oldBeforeNode = lastNode.nextSibling();
 
@@ -7585,9 +7702,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	        }
 	      }
 	    }
-	  }
-	  else if (keynum == 38) {        // Arrow Up
-	    if (altKey && !shiftKey) {  // Alt + Arrow Up
+	  } else if (keynum == 38) { // Arrow Up
+	    if (altKey && !shiftKey) { // Alt + Arrow Up
 	      // find the previous node
 	      prevNode = this._previousNode();
 	      if (prevNode) {
@@ -7595,8 +7711,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        prevNode.focus(Node.focusElement || this._getElementName(target));
 	      }
 	      handled = true;
-	    }
-	    else if (!altKey && ctrlKey && shiftKey && editable) { // Ctrl + Shift + Arrow Up
+	    } else if (!altKey && ctrlKey && shiftKey && editable) { // Ctrl + Shift + Arrow Up
 	      // select multiple nodes
 	      prevNode = this._previousNode();
 	      if (prevNode) {
@@ -7609,8 +7724,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        prevNode.focus('field'); // select field as we know this always exists
 	      }
 	      handled = true;
-	    }
-	    else if (altKey && shiftKey && editable) { // Alt + Shift + Arrow Up
+	    } else if (altKey && shiftKey && editable) { // Alt + Shift + Arrow Up
 	      // find the previous node
 	      prevNode = firstNode._previousNode();
 	      if (prevNode && prevNode.parent) {
@@ -7632,17 +7746,15 @@ return /******/ (function(modules) { // webpackBootstrap
 	      }
 	      handled = true;
 	    }
-	  }
-	  else if (keynum == 39) {        // Arrow Right
-	    if (altKey && !shiftKey) {  // Alt + Arrow Right
+	  } else if (keynum == 39) { // Arrow Right
+	    if (altKey && !shiftKey) { // Alt + Arrow Right
 	      // move to right element
 	      var nextElement = this._nextElement(target);
 	      if (nextElement) {
 	        this.focus(this._getElementName(nextElement));
 	      }
 	      handled = true;
-	    }
-	    else if (altKey && shiftKey && editable) { // Alt + Shift + Arrow Right
+	    } else if (altKey && shiftKey && editable) { // Alt + Shift + Arrow Right
 	      dom = firstNode.getDom();
 	      var prevDom = dom.previousSibling;
 	      if (prevDom) {
@@ -7666,9 +7778,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	        }
 	      }
 	    }
-	  }
-	  else if (keynum == 40) {        // Arrow Down
-	    if (altKey && !shiftKey) {  // Alt + Arrow Down
+	  } else if (keynum == 40) { // Arrow Down
+	    if (altKey && !shiftKey) { // Alt + Arrow Down
 	      // find the next node
 	      nextNode = this._nextNode();
 	      if (nextNode) {
@@ -7676,8 +7787,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        nextNode.focus(Node.focusElement || this._getElementName(target));
 	      }
 	      handled = true;
-	    }
-	    else if (!altKey && ctrlKey && shiftKey && editable) { // Ctrl + Shift + Arrow Down
+	    } else if (!altKey && ctrlKey && shiftKey && editable) { // Ctrl + Shift + Arrow Down
 	      // select multiple nodes
 	      nextNode = this._nextNode();
 	      if (nextNode) {
@@ -7690,13 +7800,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	        nextNode.focus('field'); // select field as we know this always exists
 	      }
 	      handled = true;
-	    }
-	    else if (altKey && shiftKey && editable) { // Alt + Shift + Arrow Down
+	    } else if (altKey && shiftKey && editable) { // Alt + Shift + Arrow Down
 	      // find the 2nd next node and move before that one
 	      if (lastNode.expanded) {
 	        nextNode = lastNode.append ? lastNode.append._nextNode() : undefined;
-	      }
-	      else {
+	      } else {
 	        nextNode = lastNode._nextNode();
 	      }
 
@@ -7769,7 +7877,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * Remove nodes
 	 * @param {Node[] | Node} nodes
 	 */
-	Node.onRemove = function(nodes) {
+	Node.onRemove = function (nodes) {
 	  if (!Array.isArray(nodes)) {
 	    return Node.onRemove([nodes]);
 	  }
@@ -7779,7 +7887,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var parent = firstNode.parent;
 	    var editor = firstNode.editor;
 	    var firstIndex = firstNode.getIndex();
+	    var parentField=parent.field
+	    let data = JSON.parse(editor.getText());
 	    editor.highlighter.unhighlight();
+	    let copy = data[parentField][firstIndex]
+	    editor._removeNode(copy,parentField);
 
 	    // adjust the focus
 	    var oldSelection = editor.getDomSelection();
@@ -7808,7 +7920,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * duplicated nodes will be added right after the original nodes
 	 * @param {Node[] | Node} nodes
 	 */
-	Node.onDuplicate = function(nodes) {
+	Node.onDuplicate = function (nodes) {
 	  if (!Array.isArray(nodes)) {
 	    return Node.onDuplicate([nodes]);
 	  }
@@ -7817,7 +7929,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var lastNode = nodes[nodes.length - 1];
 	    var parent = lastNode.parent;
 	    var editor = lastNode.editor;
-
+	    let data=JSON.parse(editor.getText())
 	    editor.deselect(editor.multiselection.nodes);
 
 	    // duplicate the nodes
@@ -7829,15 +7941,15 @@ return /******/ (function(modules) { // webpackBootstrap
 	      afterNode = clone;
 	      return clone;
 	    });
-
+	    let copy = data[parent.field][clones[0].index]
 	    // set selection to the duplicated nodes
 	    if (nodes.length === 1) {
 	      clones[0].focus();
-	    }
-	    else {
+	    } else {
 	      editor.select(clones);
 	    }
 	    var newSelection = editor.getDomSelection();
+	    editor._duplicateNode(clones);
 
 	    editor._onAction('duplicateNodes', {
 	      afterNode: lastNode,
@@ -7972,7 +8084,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  var order = (direction == 'desc') ? -1 : 1;
-	  var prop = (this.type == 'array') ? 'value': 'field';
+	  var prop = (this.type == 'array') ? 'value' : 'field';
 	  this.hideChilds();
 
 	  var oldChilds = this.childs;
@@ -7989,7 +8101,6 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  // update the index numbering
 	  this._updateDomIndexes();
-
 	  this.editor._onAction('sort', {
 	    node: this,
 	    oldChilds: oldChilds,
@@ -8058,11 +8169,9 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  if (parent.childs[firstIndex + nodes.length]) {
 	    parent.childs[firstIndex + nodes.length].focus();
-	  }
-	  else if (parent.childs[firstIndex - 1]) {
+	  } else if (parent.childs[firstIndex - 1]) {
 	    parent.childs[firstIndex - 1].focus();
-	  }
-	  else {
+	  } else {
 	    parent.focus();
 	  }
 	};
@@ -8142,10 +8251,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var dom = this.getDom();
 	  if (dom && dom.parentNode) {
 	    var lastDom = dom.parentNode.lastChild;
-	    lastNode =  Node.getNodeFromTarget(lastDom);
+	    lastNode = Node.getNodeFromTarget(lastDom);
 	    while (lastDom && lastNode && !lastNode.isVisible()) {
 	      lastDom = lastDom.previousSibling;
-	      lastNode =  Node.getNodeFromTarget(lastDom);
+	      lastNode = Node.getNodeFromTarget(lastDom);
 	    }
 	  }
 	  return lastNode;
@@ -8165,19 +8274,19 @@ return /******/ (function(modules) { // webpackBootstrap
 	      if (this.fieldEditable) {
 	        return dom.field;
 	      }
-	    // intentional fall through
+	      // intentional fall through
 	    case dom.field:
 	      if (this._hasChilds()) {
 	        return dom.expand;
 	      }
-	    // intentional fall through
+	      // intentional fall through
 	    case dom.expand:
 	      return dom.menu;
 	    case dom.menu:
 	      if (dom.drag) {
 	        return dom.drag;
 	      }
-	    // intentional fall through
+	      // intentional fall through
 	    default:
 	      return null;
 	  }
@@ -8199,12 +8308,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	      if (this._hasChilds()) {
 	        return dom.expand;
 	      }
-	    // intentional fall through
+	      // intentional fall through
 	    case dom.expand:
 	      if (this.fieldEditable) {
 	        return dom.field;
 	      }
-	    // intentional fall through
+	      // intentional fall through
 	    case dom.field:
 	      if (!this._hasChilds()) {
 	        return dom.value;
@@ -8253,29 +8362,29 @@ return /******/ (function(modules) { // webpackBootstrap
 	};
 
 	Node.prototype.addTemplates = function (menu, append) {
-	    var node = this;
-	    var templates = node.editor.options.templates;
-	    if (templates == null) return;
-	    if (templates.length) {
-	        // create a separator
-	        menu.push({
-	            'type': 'separator'
-	        });
-	    }
-	    var appendData = function (name, data) {
-	        node._onAppend(name, data);
-	    };
-	    var insertData = function (name, data) {
-	        node._onInsertBefore(name, data);
-	    };
-	    templates.forEach(function (template) {
-	        menu.push({
-	            text: template.text,
-	            className: (template.className || 'jsoneditor-type-object'),
-	            title: template.title,
-	            click: (append ? appendData.bind(this, template.field, template.value) : insertData.bind(this, template.field, template.value))
-	        });
+	  var node = this;
+	  var templates = node.editor.options.templates;
+	  if (templates == null) return;
+	  if (templates.length) {
+	    // create a separator
+	    menu.push({
+	      'type': 'separator'
 	    });
+	  }
+	  var appendData = function (name, data) {
+	    node._onAppend(name, data);
+	  };
+	  var insertData = function (name, data) {
+	    node._onInsertBefore(name, data);
+	  };
+	  templates.forEach(function (template) {
+	    menu.push({
+	      text: template.text,
+	      className: (template.className || 'jsoneditor-type-object'),
+	      title: template.title,
+	      click: (append ? appendData.bind(this, template.field, template.value) : insertData.bind(this, template.field, template.value))
+	    });
+	  });
 	};
 
 	/**
@@ -8295,11 +8404,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	      text: translate('type'),
 	      title: translate('typeTitle'),
 	      className: 'jsoneditor-type-' + this.type,
-	      submenu: [
-	        {
+	      submenu: [{
 	          text: translate('auto'),
 	          className: 'jsoneditor-type-auto' +
-	              (this.type == 'auto' ? ' jsoneditor-selected' : ''),
+	            (this.type == 'auto' ? ' jsoneditor-selected' : ''),
 	          title: titles.auto,
 	          click: function () {
 	            node._onChangeType('auto');
@@ -8308,7 +8416,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        {
 	          text: translate('array'),
 	          className: 'jsoneditor-type-array' +
-	              (this.type == 'array' ? ' jsoneditor-selected' : ''),
+	            (this.type == 'array' ? ' jsoneditor-selected' : ''),
 	          title: titles.array,
 	          click: function () {
 	            node._onChangeType('array');
@@ -8317,7 +8425,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        {
 	          text: translate('object'),
 	          className: 'jsoneditor-type-object' +
-	              (this.type == 'object' ? ' jsoneditor-selected' : ''),
+	            (this.type == 'object' ? ' jsoneditor-selected' : ''),
 	          title: titles.object,
 	          click: function () {
 	            node._onChangeType('object');
@@ -8326,7 +8434,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        {
 	          text: translate('string'),
 	          className: 'jsoneditor-type-string' +
-	              (this.type == 'string' ? ' jsoneditor-selected' : ''),
+	            (this.type == 'string' ? ' jsoneditor-selected' : ''),
 	          title: titles.string,
 	          click: function () {
 	            node._onChangeType('string');
@@ -8337,7 +8445,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  if (this._hasChilds()) {
-	    var direction = ((this.sortOrder == 'asc') ? 'desc': 'asc');
+	    var direction = ((this.sortOrder == 'asc') ? 'desc' : 'asc');
 	    items.push({
 	      text: translate('sort'),
 	      title: translate('sortTitle') + this.type,
@@ -8345,11 +8453,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	      click: function () {
 	        node.sort(direction);
 	      },
-	      submenu: [
-	        {
+	      submenu: [{
 	          text: translate('ascending'),
 	          className: 'jsoneditor-sort-asc',
-	          title: translate('ascendingTitle' , {type: this.type}),
+	          title: translate('ascendingTitle', {
+	            type: this.type
+	          }),
 	          click: function () {
 	            node.sort('asc');
 	          }
@@ -8357,7 +8466,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	        {
 	          text: translate('descending'),
 	          className: 'jsoneditor-sort-desc',
-	          title: translate('descendingTitle' , {type: this.type}),
+	          title: translate('descendingTitle', {
+	            type: this.type
+	          }),
 	          click: function () {
 	            node.sort('desc');
 	          }
@@ -8377,89 +8488,87 @@ return /******/ (function(modules) { // webpackBootstrap
 	    // create append button (for last child node only)
 	    var childs = node.parent.childs;
 	    if (node == childs[childs.length - 1]) {
-	        var appendSubmenu = [
-	            {
-	                text: translate('auto'),
-	                className: 'jsoneditor-type-auto',
-	                title: titles.auto,
-	                click: function () {
-	                    node._onAppend('', '', 'auto');
-	                }
-	            },
-	            {
-	                text: translate('array'),
-	                className: 'jsoneditor-type-array',
-	                title: titles.array,
-	                click: function () {
-	                    node._onAppend('', []);
-	                }
-	            },
-	            {
-	                text: translate('object'),
-	                className: 'jsoneditor-type-object',
-	                title: titles.object,
-	                click: function () {
-	                    node._onAppend('', {});
-	                }
-	            },
-	            {
-	                text: translate('string'),
-	                className: 'jsoneditor-type-string',
-	                title: titles.string,
-	                click: function () {
-	                    node._onAppend('', '', 'string');
-	                }
-	            }
-	        ];
-	        node.addTemplates(appendSubmenu, true);
-	        items.push({
-	            text: translate('appendText'),
-	            title: translate('appendTitle'),
-	            submenuTitle: translate('appendSubmenuTitle'),
-	            className: 'jsoneditor-append',
-	            click: function () {
-	                node._onAppend('', '', 'auto');
-	            },
-	            submenu: appendSubmenu
-	        });
+	      var appendSubmenu = [{
+	          text: translate('auto'),
+	          className: 'jsoneditor-type-auto',
+	          title: titles.auto,
+	          click: function () {
+	            node._onAppend('', '', 'auto');
+	          }
+	        },
+	        {
+	          text: translate('array'),
+	          className: 'jsoneditor-type-array',
+	          title: titles.array,
+	          click: function () {
+	            node._onAppend('', []);
+	          }
+	        },
+	        {
+	          text: translate('object'),
+	          className: 'jsoneditor-type-object',
+	          title: titles.object,
+	          click: function () {
+	            node._onAppend('', {});
+	          }
+	        },
+	        {
+	          text: translate('string'),
+	          className: 'jsoneditor-type-string',
+	          title: titles.string,
+	          click: function () {
+	            node._onAppend('', '', 'string');
+	          }
+	        }
+	      ];
+	      node.addTemplates(appendSubmenu, true);
+	      items.push({
+	        text: translate('appendText'),
+	        title: translate('appendTitle'),
+	        submenuTitle: translate('appendSubmenuTitle'),
+	        className: 'jsoneditor-append',
+	        click: function () {
+	          node._onAppend('', '', 'auto');
+	        },
+	        submenu: appendSubmenu
+	      });
 	    }
 
 
 
 	    // create insert button
-	    var insertSubmenu = [
-	        {
-	            text: translate('auto'),
-	            className: 'jsoneditor-type-auto',
-	            title: titles.auto,
-	            click: function () {
-	                node._onInsertBefore('', '', 'auto');
-	            }
-	        },
-	        {
-	            text: translate('array'),
-	            className: 'jsoneditor-type-array',
-	            title: titles.array,
-	            click: function () {
-	                node._onInsertBefore('', []);
-	            }
-	        },
-	        {
-	            text: translate('object'),
-	            className: 'jsoneditor-type-object',
-	            title: titles.object,
-	            click: function () {
-	                node._onInsertBefore('', {});
-	            }
-	        },
-	        {
-	            text: translate('string'),
-	            className: 'jsoneditor-type-string',
-	            title: titles.string,
-	            click: function () {
-	                node._onInsertBefore('', '', 'string');
-	            }
+	    var insertSubmenu = [{
+	        text: translate('auto'),
+	        className: 'jsoneditor-type-auto',
+	        title: titles.auto,
+	        click: function () {
+	          node._onInsertBefore('', '', 'auto');
 	        }
+	      },
+	      {
+	        text: translate('array'),
+	        className: 'jsoneditor-type-array',
+	        title: titles.array,
+	        click: function () {
+	          node._onInsertBefore('', []);
+	        }
+	      },
+	      {
+	        text: translate('object'),
+	        className: 'jsoneditor-type-object',
+	        title: titles.object,
+	        click: function () {
+	          node._onInsertBefore('', {});
+	        }
+	      },
+	      {
+	        text: translate('string'),
+	        className: 'jsoneditor-type-string',
+	        title: titles.string,
+	        click: function () {
+	          node._onInsertBefore('', '', 'string');
+	        }
+	      }
 	    ];
 	    node.addTemplates(insertSubmenu, false);
 	    items.push({
@@ -8480,6 +8589,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        title: translate('duplicateField'),
 	        className: 'jsoneditor-duplicate',
 	        click: function () {
+	          console.log('node',node);
 	          Node.onDuplicate(node);
 	        }
 	      });
@@ -8496,7 +8606,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }
 	  }
 
-	  var menu = new ContextMenu(items, {close: onClose});
+	  var menu = new ContextMenu(items, {
+	    close: onClose
+	  });
 	  menu.show(anchor, this.editor.content);
 	};
 
@@ -8506,14 +8618,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @return {String} type   Can be 'object', 'array', 'string', 'auto'
 	 * @private
 	 */
-	Node.prototype._getType = function(value) {
+	Node.prototype._getType = function (value) {
 	  if (value instanceof Array) {
 	    return 'array';
 	  }
 	  if (value instanceof Object) {
 	    return 'object';
 	  }
-	  if (typeof(value) == 'string' && typeof(this._stringCast(value)) != 'string') {
+	  if (typeof (value) == 'string' && typeof (this._stringCast(value)) != 'string') {
 	    return 'string';
 	  }
 
@@ -8527,27 +8639,22 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @return {*} castedStr
 	 * @private
 	 */
-	Node.prototype._stringCast = function(str) {
+	Node.prototype._stringCast = function (str) {
 	  var lower = str.toLowerCase(),
-	      num = Number(str),          // will nicely fail with '123ab'
-	      numFloat = parseFloat(str); // will nicely fail with '  '
+	    num = Number(str), // will nicely fail with '123ab'
+	    numFloat = parseFloat(str); // will nicely fail with '  '
 
 	  if (str == '') {
 	    return '';
-	  }
-	  else if (lower == 'null') {
+	  } else if (lower == 'null') {
 	    return null;
-	  }
-	  else if (lower == 'true') {
+	  } else if (lower == 'true') {
 	    return true;
-	  }
-	  else if (lower == 'false') {
+	  } else if (lower == 'false') {
 	    return false;
-	  }
-	  else if (!isNaN(num) && !isNaN(numFloat)) {
+	  } else if (!isNaN(num) && !isNaN(numFloat)) {
 	    return num;
-	  }
-	  else {
+	  } else {
 	    return str;
 	  }
 	};
@@ -8561,15 +8668,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	Node.prototype._escapeHTML = function (text) {
 	  if (typeof text !== 'string') {
 	    return String(text);
-	  }
-	  else {
+	  } else {
 	    var htmlEscaped = String(text)
-	        .replace(/&/g, '&amp;')    // must be replaced first!
-	        .replace(/</g, '&lt;')
-	        .replace(/>/g, '&gt;')
-	        .replace(/  /g, ' &nbsp;') // replace double space with an nbsp and space
-	        .replace(/^ /, '&nbsp;')   // space at start
-	        .replace(/ $/, '&nbsp;');  // space at end
+	      .replace(/&/g, '&amp;') // must be replaced first!
+	      .replace(/</g, '&lt;')
+	      .replace(/>/g, '&gt;')
+	      .replace(/  /g, ' &nbsp;') // replace double space with an nbsp and space
+	      .replace(/^ /, '&nbsp;') // space at start
+	      .replace(/ $/, '&nbsp;'); // space at end
 
 	    var json = JSON.stringify(htmlEscaped);
 	    var html = json.substring(1, json.length - 1);
@@ -8591,10 +8697,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var htmlEscaped = util.parse(json);
 
 	  return htmlEscaped
-	      .replace(/&lt;/g, '<')
-	      .replace(/&gt;/g, '>')
-	      .replace(/&nbsp;|\u00A0/g, ' ')
-	      .replace(/&amp;/g, '&');   // must be replaced last
+	    .replace(/&lt;/g, '<')
+	    .replace(/&gt;/g, '>')
+	    .replace(/&nbsp;|\u00A0/g, ' ')
+	    .replace(/&amp;/g, '&'); // must be replaced last
 	};
 
 	/**
@@ -8614,21 +8720,18 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var c = text.charAt(i);
 	    if (c == '\n') {
 	      escaped += '\\n';
-	    }
-	    else if (c == '\\') {
+	    } else if (c == '\\') {
 	      escaped += c;
 	      i++;
 
 	      c = text.charAt(i);
 	      if (c === '' || '"\\/bfnrtu'.indexOf(c) == -1) {
-	        escaped += '\\';  // no valid escape character
+	        escaped += '\\'; // no valid escape character
 	      }
 	      escaped += c;
-	    }
-	    else if (c == '"') {
+	    } else if (c == '"') {
 	      escaped += '\\"';
-	    }
-	    else {
+	    } else {
 	      escaped += c;
 	    }
 	    i++;
@@ -8643,7 +8746,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	var ShowMoreNode = showMoreNodeFactory(Node);
 
 	module.exports = Node;
-
 
 /***/ },
 /* 11 */
@@ -9211,6 +9313,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  if (this.dom && this.dom.frame && this.dom.frame.parentNode) {
 	    this.dom.frame.parentNode.removeChild(this.dom.frame);
 	  }
+	  console.log('dom',this.dom);
 	  this.dom = null;
 	};
 
@@ -9219,6 +9322,113 @@ return /******/ (function(modules) { // webpackBootstrap
 
 /***/ },
 /* 15 */
+/***/ function(module, exports, __webpack_require__) {
+
+	'use strict';
+
+	var ContextMenu = __webpack_require__(7);
+
+	/**
+	 * Create a select box to be used in the editor menu's, which allows to switch filter mode 
+	 * @param {HTMLElement} container
+	 * @param {String[]} modes  Available modes: 'all','difference','identical'
+	 * @param {String} current  Available modes: 'all','difference','identical'
+	 * @param {function(mode: string)} onSwitch  Callback invoked on switch
+	 * @constructor
+	 */
+	function FilterSwitcher(container, modes, current, onSwitch) {
+	  // available modes
+	  var availableModes = {
+	    all: {
+	      'text': 'all',
+	      'title': 'Switch to all filter condition',
+	      'click': function () {
+	        onSwitch('all')
+	      }
+	    },
+	    difference: {
+	      'text': 'difference',
+	      'title': 'Switch to difference condition mode',
+	      'click': function () {
+	        onSwitch('difference');
+	      }
+	    },
+	    identical: {
+	      'text': 'identical',
+	      'title': 'Switch to identical condition',
+	      'click': function () {
+	        onSwitch('identical');
+	      }
+	    },
+	  };
+
+	  // list the selected modes
+	  var items = [];
+	  for (var i = 0; i < modes.length; i++) {
+	    var mode = modes[i];
+	    var item = availableModes[mode];
+	    if (!item) {
+	      throw new Error('Unknown mode "' + mode + '"');
+	    }
+
+	    item.className = 'jsoneditor-type-modes' + ((current == mode) ? ' jsoneditor-selected' : '');
+	    items.push(item);
+	  }
+
+	  // retrieve the title of current mode
+	  var currentMode = availableModes[current];
+	  if (!currentMode) {
+	    throw new Error('Unknown mode "' + current + '"');
+	  }
+	  var currentTitle = currentMode.text;
+
+	  // create the html element
+	  var box = document.createElement('button');
+	  box.type = 'button';
+	  box.className = 'jsoneditor-modes jsoneditor-separator';
+	  box.innerHTML = currentTitle + ' &#x25BE;';
+	  box.title = 'Switch editor mode';
+	  box.onclick = function () {
+	    var menu = new ContextMenu(items);
+	    menu.show(box);
+	  };
+
+	  var frame = document.createElement('div');
+	  frame.className = 'jsoneditor-modes';
+	  frame.style.position = 'relative';
+	  frame.appendChild(box);
+
+	  container.appendChild(frame);
+	  this.dom = {
+	    container: container,
+	    box: box,
+	    frame: frame
+	  };
+	  console.log('this.dom',this.dom);
+	}
+
+	/**
+	 * Set focus to switcher
+	 */
+	FilterSwitcher.prototype.focus = function () {
+	  this.dom.box.focus();
+	};
+
+	/**
+	 * Destroy the FilterSwitcher, remove from DOM
+	 */
+	FilterSwitcher.prototype.destroy = function () {
+	  if (this.dom && this.dom.frame && this.dom.frame.parentNode) {
+	    this.dom.frame.parentNode.removeChild(this.dom.frame);
+	  }
+	  this.dom = null;
+	};
+
+	module.exports = FilterSwitcher;
+
+
+/***/ },
+/* 16 */
 /***/ function(module, exports) {
 
 	'use strict';
@@ -9605,12 +9815,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	module.exports = completely;
 
 /***/ },
-/* 16 */
+/* 17 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
 
-	var ace = __webpack_require__(17);
+	var ace = __webpack_require__(18);
 	var ModeSwitcher = __webpack_require__(14);
 	var util = __webpack_require__(4);
 
@@ -9681,7 +9891,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  this.theme = options.theme || DEFAULT_THEME;
 	  if (this.theme === DEFAULT_THEME && _ace) {
 	    try {
-	      __webpack_require__(21);
+	      __webpack_require__(22);
 	    }
 	    catch (err) {
 	      console.error(err);
@@ -10427,7 +10637,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 
 /***/ },
-/* 17 */
+/* 18 */
 /***/ function(module, exports, __webpack_require__) {
 
 	var ace
@@ -10441,8 +10651,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	    ace = __webpack_require__(!(function webpackMissingModule() { var e = new Error("Cannot find module \"brace\""); e.code = 'MODULE_NOT_FOUND'; throw e; }()));
 
 	    // load required Ace plugins
-	    __webpack_require__(18);
-	    __webpack_require__(20);
+	    __webpack_require__(19);
+	    __webpack_require__(21);
 	  }
 	  catch (err) {
 	    // failed to load brace (can be minimalist bundle).
@@ -10454,7 +10664,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 
 /***/ },
-/* 18 */
+/* 19 */
 /***/ function(module, exports, __webpack_require__) {
 
 	ace.define("ace/mode/json_highlight_rules",["require","exports","module","ace/lib/oop","ace/mode/text_highlight_rules"], function(acequire, exports, module) {
@@ -10756,7 +10966,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    };
 
 	    this.createWorker = function(session) {
-	        var worker = new WorkerClient(["ace"], __webpack_require__(19), "JsonWorker");
+	        var worker = new WorkerClient(["ace"], __webpack_require__(20), "JsonWorker");
 	        worker.attachToDocument(session.getDocument());
 
 	        worker.on("annotate", function(e) {
@@ -10779,14 +10989,14 @@ return /******/ (function(modules) { // webpackBootstrap
 
 
 /***/ },
-/* 19 */
+/* 20 */
 /***/ function(module, exports) {
 
 	module.exports.id = 'ace/mode/json_worker';
 	module.exports.src = "\"no use strict\";!function(window){function resolveModuleId(id,paths){for(var testPath=id,tail=\"\";testPath;){var alias=paths[testPath];if(\"string\"==typeof alias)return alias+tail;if(alias)return alias.location.replace(/\\/*$/,\"/\")+(tail||alias.main||alias.name);if(alias===!1)return\"\";var i=testPath.lastIndexOf(\"/\");if(-1===i)break;tail=testPath.substr(i)+tail,testPath=testPath.slice(0,i)}return id}if(!(void 0!==window.window&&window.document||window.acequire&&window.define)){window.console||(window.console=function(){var msgs=Array.prototype.slice.call(arguments,0);postMessage({type:\"log\",data:msgs})},window.console.error=window.console.warn=window.console.log=window.console.trace=window.console),window.window=window,window.ace=window,window.onerror=function(message,file,line,col,err){postMessage({type:\"error\",data:{message:message,data:err.data,file:file,line:line,col:col,stack:err.stack}})},window.normalizeModule=function(parentId,moduleName){if(-1!==moduleName.indexOf(\"!\")){var chunks=moduleName.split(\"!\");return window.normalizeModule(parentId,chunks[0])+\"!\"+window.normalizeModule(parentId,chunks[1])}if(\".\"==moduleName.charAt(0)){var base=parentId.split(\"/\").slice(0,-1).join(\"/\");for(moduleName=(base?base+\"/\":\"\")+moduleName;-1!==moduleName.indexOf(\".\")&&previous!=moduleName;){var previous=moduleName;moduleName=moduleName.replace(/^\\.\\//,\"\").replace(/\\/\\.\\//,\"/\").replace(/[^\\/]+\\/\\.\\.\\//,\"\")}}return moduleName},window.acequire=function acequire(parentId,id){if(id||(id=parentId,parentId=null),!id.charAt)throw Error(\"worker.js acequire() accepts only (parentId, id) as arguments\");id=window.normalizeModule(parentId,id);var module=window.acequire.modules[id];if(module)return module.initialized||(module.initialized=!0,module.exports=module.factory().exports),module.exports;if(!window.acequire.tlns)return console.log(\"unable to load \"+id);var path=resolveModuleId(id,window.acequire.tlns);return\".js\"!=path.slice(-3)&&(path+=\".js\"),window.acequire.id=id,window.acequire.modules[id]={},importScripts(path),window.acequire(parentId,id)},window.acequire.modules={},window.acequire.tlns={},window.define=function(id,deps,factory){if(2==arguments.length?(factory=deps,\"string\"!=typeof id&&(deps=id,id=window.acequire.id)):1==arguments.length&&(factory=id,deps=[],id=window.acequire.id),\"function\"!=typeof factory)return window.acequire.modules[id]={exports:factory,initialized:!0},void 0;deps.length||(deps=[\"require\",\"exports\",\"module\"]);var req=function(childId){return window.acequire(id,childId)};window.acequire.modules[id]={exports:{},factory:function(){var module=this,returnExports=factory.apply(this,deps.map(function(dep){switch(dep){case\"require\":return req;case\"exports\":return module.exports;case\"module\":return module;default:return req(dep)}}));return returnExports&&(module.exports=returnExports),module}}},window.define.amd={},acequire.tlns={},window.initBaseUrls=function(topLevelNamespaces){for(var i in topLevelNamespaces)acequire.tlns[i]=topLevelNamespaces[i]},window.initSender=function(){var EventEmitter=window.acequire(\"ace/lib/event_emitter\").EventEmitter,oop=window.acequire(\"ace/lib/oop\"),Sender=function(){};return function(){oop.implement(this,EventEmitter),this.callback=function(data,callbackId){postMessage({type:\"call\",id:callbackId,data:data})},this.emit=function(name,data){postMessage({type:\"event\",name:name,data:data})}}.call(Sender.prototype),new Sender};var main=window.main=null,sender=window.sender=null;window.onmessage=function(e){var msg=e.data;if(msg.event&&sender)sender._signal(msg.event,msg.data);else if(msg.command)if(main[msg.command])main[msg.command].apply(main,msg.args);else{if(!window[msg.command])throw Error(\"Unknown command:\"+msg.command);window[msg.command].apply(window,msg.args)}else if(msg.init){window.initBaseUrls(msg.tlns),acequire(\"ace/lib/es5-shim\"),sender=window.sender=window.initSender();var clazz=acequire(msg.module)[msg.classname];main=window.main=new clazz(sender)}}}}(this),ace.define(\"ace/lib/oop\",[\"require\",\"exports\",\"module\"],function(acequire,exports){\"use strict\";exports.inherits=function(ctor,superCtor){ctor.super_=superCtor,ctor.prototype=Object.create(superCtor.prototype,{constructor:{value:ctor,enumerable:!1,writable:!0,configurable:!0}})},exports.mixin=function(obj,mixin){for(var key in mixin)obj[key]=mixin[key];return obj},exports.implement=function(proto,mixin){exports.mixin(proto,mixin)}}),ace.define(\"ace/range\",[\"require\",\"exports\",\"module\"],function(acequire,exports){\"use strict\";var comparePoints=function(p1,p2){return p1.row-p2.row||p1.column-p2.column},Range=function(startRow,startColumn,endRow,endColumn){this.start={row:startRow,column:startColumn},this.end={row:endRow,column:endColumn}};(function(){this.isEqual=function(range){return this.start.row===range.start.row&&this.end.row===range.end.row&&this.start.column===range.start.column&&this.end.column===range.end.column},this.toString=function(){return\"Range: [\"+this.start.row+\"/\"+this.start.column+\"] -> [\"+this.end.row+\"/\"+this.end.column+\"]\"},this.contains=function(row,column){return 0==this.compare(row,column)},this.compareRange=function(range){var cmp,end=range.end,start=range.start;return cmp=this.compare(end.row,end.column),1==cmp?(cmp=this.compare(start.row,start.column),1==cmp?2:0==cmp?1:0):-1==cmp?-2:(cmp=this.compare(start.row,start.column),-1==cmp?-1:1==cmp?42:0)},this.comparePoint=function(p){return this.compare(p.row,p.column)},this.containsRange=function(range){return 0==this.comparePoint(range.start)&&0==this.comparePoint(range.end)},this.intersects=function(range){var cmp=this.compareRange(range);return-1==cmp||0==cmp||1==cmp},this.isEnd=function(row,column){return this.end.row==row&&this.end.column==column},this.isStart=function(row,column){return this.start.row==row&&this.start.column==column},this.setStart=function(row,column){\"object\"==typeof row?(this.start.column=row.column,this.start.row=row.row):(this.start.row=row,this.start.column=column)},this.setEnd=function(row,column){\"object\"==typeof row?(this.end.column=row.column,this.end.row=row.row):(this.end.row=row,this.end.column=column)},this.inside=function(row,column){return 0==this.compare(row,column)?this.isEnd(row,column)||this.isStart(row,column)?!1:!0:!1},this.insideStart=function(row,column){return 0==this.compare(row,column)?this.isEnd(row,column)?!1:!0:!1},this.insideEnd=function(row,column){return 0==this.compare(row,column)?this.isStart(row,column)?!1:!0:!1},this.compare=function(row,column){return this.isMultiLine()||row!==this.start.row?this.start.row>row?-1:row>this.end.row?1:this.start.row===row?column>=this.start.column?0:-1:this.end.row===row?this.end.column>=column?0:1:0:this.start.column>column?-1:column>this.end.column?1:0},this.compareStart=function(row,column){return this.start.row==row&&this.start.column==column?-1:this.compare(row,column)},this.compareEnd=function(row,column){return this.end.row==row&&this.end.column==column?1:this.compare(row,column)},this.compareInside=function(row,column){return this.end.row==row&&this.end.column==column?1:this.start.row==row&&this.start.column==column?-1:this.compare(row,column)},this.clipRows=function(firstRow,lastRow){if(this.end.row>lastRow)var end={row:lastRow+1,column:0};else if(firstRow>this.end.row)var end={row:firstRow,column:0};if(this.start.row>lastRow)var start={row:lastRow+1,column:0};else if(firstRow>this.start.row)var start={row:firstRow,column:0};return Range.fromPoints(start||this.start,end||this.end)},this.extend=function(row,column){var cmp=this.compare(row,column);if(0==cmp)return this;if(-1==cmp)var start={row:row,column:column};else var end={row:row,column:column};return Range.fromPoints(start||this.start,end||this.end)},this.isEmpty=function(){return this.start.row===this.end.row&&this.start.column===this.end.column},this.isMultiLine=function(){return this.start.row!==this.end.row},this.clone=function(){return Range.fromPoints(this.start,this.end)},this.collapseRows=function(){return 0==this.end.column?new Range(this.start.row,0,Math.max(this.start.row,this.end.row-1),0):new Range(this.start.row,0,this.end.row,0)},this.toScreenRange=function(session){var screenPosStart=session.documentToScreenPosition(this.start),screenPosEnd=session.documentToScreenPosition(this.end);return new Range(screenPosStart.row,screenPosStart.column,screenPosEnd.row,screenPosEnd.column)},this.moveBy=function(row,column){this.start.row+=row,this.start.column+=column,this.end.row+=row,this.end.column+=column}}).call(Range.prototype),Range.fromPoints=function(start,end){return new Range(start.row,start.column,end.row,end.column)},Range.comparePoints=comparePoints,Range.comparePoints=function(p1,p2){return p1.row-p2.row||p1.column-p2.column},exports.Range=Range}),ace.define(\"ace/apply_delta\",[\"require\",\"exports\",\"module\"],function(acequire,exports){\"use strict\";exports.applyDelta=function(docLines,delta){var row=delta.start.row,startColumn=delta.start.column,line=docLines[row]||\"\";switch(delta.action){case\"insert\":var lines=delta.lines;if(1===lines.length)docLines[row]=line.substring(0,startColumn)+delta.lines[0]+line.substring(startColumn);else{var args=[row,1].concat(delta.lines);docLines.splice.apply(docLines,args),docLines[row]=line.substring(0,startColumn)+docLines[row],docLines[row+delta.lines.length-1]+=line.substring(startColumn)}break;case\"remove\":var endColumn=delta.end.column,endRow=delta.end.row;row===endRow?docLines[row]=line.substring(0,startColumn)+line.substring(endColumn):docLines.splice(row,endRow-row+1,line.substring(0,startColumn)+docLines[endRow].substring(endColumn))}}}),ace.define(\"ace/lib/event_emitter\",[\"require\",\"exports\",\"module\"],function(acequire,exports){\"use strict\";var EventEmitter={},stopPropagation=function(){this.propagationStopped=!0},preventDefault=function(){this.defaultPrevented=!0};EventEmitter._emit=EventEmitter._dispatchEvent=function(eventName,e){this._eventRegistry||(this._eventRegistry={}),this._defaultHandlers||(this._defaultHandlers={});var listeners=this._eventRegistry[eventName]||[],defaultHandler=this._defaultHandlers[eventName];if(listeners.length||defaultHandler){\"object\"==typeof e&&e||(e={}),e.type||(e.type=eventName),e.stopPropagation||(e.stopPropagation=stopPropagation),e.preventDefault||(e.preventDefault=preventDefault),listeners=listeners.slice();for(var i=0;listeners.length>i&&(listeners[i](e,this),!e.propagationStopped);i++);return defaultHandler&&!e.defaultPrevented?defaultHandler(e,this):void 0}},EventEmitter._signal=function(eventName,e){var listeners=(this._eventRegistry||{})[eventName];if(listeners){listeners=listeners.slice();for(var i=0;listeners.length>i;i++)listeners[i](e,this)}},EventEmitter.once=function(eventName,callback){var _self=this;callback&&this.addEventListener(eventName,function newCallback(){_self.removeEventListener(eventName,newCallback),callback.apply(null,arguments)})},EventEmitter.setDefaultHandler=function(eventName,callback){var handlers=this._defaultHandlers;if(handlers||(handlers=this._defaultHandlers={_disabled_:{}}),handlers[eventName]){var old=handlers[eventName],disabled=handlers._disabled_[eventName];disabled||(handlers._disabled_[eventName]=disabled=[]),disabled.push(old);var i=disabled.indexOf(callback);-1!=i&&disabled.splice(i,1)}handlers[eventName]=callback},EventEmitter.removeDefaultHandler=function(eventName,callback){var handlers=this._defaultHandlers;if(handlers){var disabled=handlers._disabled_[eventName];if(handlers[eventName]==callback)handlers[eventName],disabled&&this.setDefaultHandler(eventName,disabled.pop());else if(disabled){var i=disabled.indexOf(callback);-1!=i&&disabled.splice(i,1)}}},EventEmitter.on=EventEmitter.addEventListener=function(eventName,callback,capturing){this._eventRegistry=this._eventRegistry||{};var listeners=this._eventRegistry[eventName];return listeners||(listeners=this._eventRegistry[eventName]=[]),-1==listeners.indexOf(callback)&&listeners[capturing?\"unshift\":\"push\"](callback),callback},EventEmitter.off=EventEmitter.removeListener=EventEmitter.removeEventListener=function(eventName,callback){this._eventRegistry=this._eventRegistry||{};var listeners=this._eventRegistry[eventName];if(listeners){var index=listeners.indexOf(callback);-1!==index&&listeners.splice(index,1)}},EventEmitter.removeAllListeners=function(eventName){this._eventRegistry&&(this._eventRegistry[eventName]=[])},exports.EventEmitter=EventEmitter}),ace.define(\"ace/anchor\",[\"require\",\"exports\",\"module\",\"ace/lib/oop\",\"ace/lib/event_emitter\"],function(acequire,exports){\"use strict\";var oop=acequire(\"./lib/oop\"),EventEmitter=acequire(\"./lib/event_emitter\").EventEmitter,Anchor=exports.Anchor=function(doc,row,column){this.$onChange=this.onChange.bind(this),this.attach(doc),column===void 0?this.setPosition(row.row,row.column):this.setPosition(row,column)};(function(){function $pointsInOrder(point1,point2,equalPointsInOrder){var bColIsAfter=equalPointsInOrder?point1.column<=point2.column:point1.column<point2.column;return point1.row<point2.row||point1.row==point2.row&&bColIsAfter}function $getTransformedPoint(delta,point,moveIfEqual){var deltaIsInsert=\"insert\"==delta.action,deltaRowShift=(deltaIsInsert?1:-1)*(delta.end.row-delta.start.row),deltaColShift=(deltaIsInsert?1:-1)*(delta.end.column-delta.start.column),deltaStart=delta.start,deltaEnd=deltaIsInsert?deltaStart:delta.end;return $pointsInOrder(point,deltaStart,moveIfEqual)?{row:point.row,column:point.column}:$pointsInOrder(deltaEnd,point,!moveIfEqual)?{row:point.row+deltaRowShift,column:point.column+(point.row==deltaEnd.row?deltaColShift:0)}:{row:deltaStart.row,column:deltaStart.column}}oop.implement(this,EventEmitter),this.getPosition=function(){return this.$clipPositionToDocument(this.row,this.column)},this.getDocument=function(){return this.document},this.$insertRight=!1,this.onChange=function(delta){if(!(delta.start.row==delta.end.row&&delta.start.row!=this.row||delta.start.row>this.row)){var point=$getTransformedPoint(delta,{row:this.row,column:this.column},this.$insertRight);this.setPosition(point.row,point.column,!0)}},this.setPosition=function(row,column,noClip){var pos;if(pos=noClip?{row:row,column:column}:this.$clipPositionToDocument(row,column),this.row!=pos.row||this.column!=pos.column){var old={row:this.row,column:this.column};this.row=pos.row,this.column=pos.column,this._signal(\"change\",{old:old,value:pos})}},this.detach=function(){this.document.removeEventListener(\"change\",this.$onChange)},this.attach=function(doc){this.document=doc||this.document,this.document.on(\"change\",this.$onChange)},this.$clipPositionToDocument=function(row,column){var pos={};return row>=this.document.getLength()?(pos.row=Math.max(0,this.document.getLength()-1),pos.column=this.document.getLine(pos.row).length):0>row?(pos.row=0,pos.column=0):(pos.row=row,pos.column=Math.min(this.document.getLine(pos.row).length,Math.max(0,column))),0>column&&(pos.column=0),pos}}).call(Anchor.prototype)}),ace.define(\"ace/document\",[\"require\",\"exports\",\"module\",\"ace/lib/oop\",\"ace/apply_delta\",\"ace/lib/event_emitter\",\"ace/range\",\"ace/anchor\"],function(acequire,exports){\"use strict\";var oop=acequire(\"./lib/oop\"),applyDelta=acequire(\"./apply_delta\").applyDelta,EventEmitter=acequire(\"./lib/event_emitter\").EventEmitter,Range=acequire(\"./range\").Range,Anchor=acequire(\"./anchor\").Anchor,Document=function(textOrLines){this.$lines=[\"\"],0===textOrLines.length?this.$lines=[\"\"]:Array.isArray(textOrLines)?this.insertMergedLines({row:0,column:0},textOrLines):this.insert({row:0,column:0},textOrLines)};(function(){oop.implement(this,EventEmitter),this.setValue=function(text){var len=this.getLength()-1;this.remove(new Range(0,0,len,this.getLine(len).length)),this.insert({row:0,column:0},text)},this.getValue=function(){return this.getAllLines().join(this.getNewLineCharacter())},this.createAnchor=function(row,column){return new Anchor(this,row,column)},this.$split=0===\"aaa\".split(/a/).length?function(text){return text.replace(/\\r\\n|\\r/g,\"\\n\").split(\"\\n\")}:function(text){return text.split(/\\r\\n|\\r|\\n/)},this.$detectNewLine=function(text){var match=text.match(/^.*?(\\r\\n|\\r|\\n)/m);this.$autoNewLine=match?match[1]:\"\\n\",this._signal(\"changeNewLineMode\")},this.getNewLineCharacter=function(){switch(this.$newLineMode){case\"windows\":return\"\\r\\n\";case\"unix\":return\"\\n\";default:return this.$autoNewLine||\"\\n\"}},this.$autoNewLine=\"\",this.$newLineMode=\"auto\",this.setNewLineMode=function(newLineMode){this.$newLineMode!==newLineMode&&(this.$newLineMode=newLineMode,this._signal(\"changeNewLineMode\"))},this.getNewLineMode=function(){return this.$newLineMode},this.isNewLine=function(text){return\"\\r\\n\"==text||\"\\r\"==text||\"\\n\"==text},this.getLine=function(row){return this.$lines[row]||\"\"},this.getLines=function(firstRow,lastRow){return this.$lines.slice(firstRow,lastRow+1)},this.getAllLines=function(){return this.getLines(0,this.getLength())},this.getLength=function(){return this.$lines.length},this.getTextRange=function(range){return this.getLinesForRange(range).join(this.getNewLineCharacter())},this.getLinesForRange=function(range){var lines;if(range.start.row===range.end.row)lines=[this.getLine(range.start.row).substring(range.start.column,range.end.column)];else{lines=this.getLines(range.start.row,range.end.row),lines[0]=(lines[0]||\"\").substring(range.start.column);var l=lines.length-1;range.end.row-range.start.row==l&&(lines[l]=lines[l].substring(0,range.end.column))}return lines},this.insertLines=function(row,lines){return console.warn(\"Use of document.insertLines is deprecated. Use the insertFullLines method instead.\"),this.insertFullLines(row,lines)},this.removeLines=function(firstRow,lastRow){return console.warn(\"Use of document.removeLines is deprecated. Use the removeFullLines method instead.\"),this.removeFullLines(firstRow,lastRow)},this.insertNewLine=function(position){return console.warn(\"Use of document.insertNewLine is deprecated. Use insertMergedLines(position, ['', '']) instead.\"),this.insertMergedLines(position,[\"\",\"\"])},this.insert=function(position,text){return 1>=this.getLength()&&this.$detectNewLine(text),this.insertMergedLines(position,this.$split(text))},this.insertInLine=function(position,text){var start=this.clippedPos(position.row,position.column),end=this.pos(position.row,position.column+text.length);return this.applyDelta({start:start,end:end,action:\"insert\",lines:[text]},!0),this.clonePos(end)},this.clippedPos=function(row,column){var length=this.getLength();void 0===row?row=length:0>row?row=0:row>=length&&(row=length-1,column=void 0);var line=this.getLine(row);return void 0==column&&(column=line.length),column=Math.min(Math.max(column,0),line.length),{row:row,column:column}},this.clonePos=function(pos){return{row:pos.row,column:pos.column}},this.pos=function(row,column){return{row:row,column:column}},this.$clipPosition=function(position){var length=this.getLength();return position.row>=length?(position.row=Math.max(0,length-1),position.column=this.getLine(length-1).length):(position.row=Math.max(0,position.row),position.column=Math.min(Math.max(position.column,0),this.getLine(position.row).length)),position},this.insertFullLines=function(row,lines){row=Math.min(Math.max(row,0),this.getLength());var column=0;this.getLength()>row?(lines=lines.concat([\"\"]),column=0):(lines=[\"\"].concat(lines),row--,column=this.$lines[row].length),this.insertMergedLines({row:row,column:column},lines)},this.insertMergedLines=function(position,lines){var start=this.clippedPos(position.row,position.column),end={row:start.row+lines.length-1,column:(1==lines.length?start.column:0)+lines[lines.length-1].length};return this.applyDelta({start:start,end:end,action:\"insert\",lines:lines}),this.clonePos(end)},this.remove=function(range){var start=this.clippedPos(range.start.row,range.start.column),end=this.clippedPos(range.end.row,range.end.column);return this.applyDelta({start:start,end:end,action:\"remove\",lines:this.getLinesForRange({start:start,end:end})}),this.clonePos(start)},this.removeInLine=function(row,startColumn,endColumn){var start=this.clippedPos(row,startColumn),end=this.clippedPos(row,endColumn);return this.applyDelta({start:start,end:end,action:\"remove\",lines:this.getLinesForRange({start:start,end:end})},!0),this.clonePos(start)},this.removeFullLines=function(firstRow,lastRow){firstRow=Math.min(Math.max(0,firstRow),this.getLength()-1),lastRow=Math.min(Math.max(0,lastRow),this.getLength()-1);var deleteFirstNewLine=lastRow==this.getLength()-1&&firstRow>0,deleteLastNewLine=this.getLength()-1>lastRow,startRow=deleteFirstNewLine?firstRow-1:firstRow,startCol=deleteFirstNewLine?this.getLine(startRow).length:0,endRow=deleteLastNewLine?lastRow+1:lastRow,endCol=deleteLastNewLine?0:this.getLine(endRow).length,range=new Range(startRow,startCol,endRow,endCol),deletedLines=this.$lines.slice(firstRow,lastRow+1);return this.applyDelta({start:range.start,end:range.end,action:\"remove\",lines:this.getLinesForRange(range)}),deletedLines},this.removeNewLine=function(row){this.getLength()-1>row&&row>=0&&this.applyDelta({start:this.pos(row,this.getLine(row).length),end:this.pos(row+1,0),action:\"remove\",lines:[\"\",\"\"]})},this.replace=function(range,text){if(range instanceof Range||(range=Range.fromPoints(range.start,range.end)),0===text.length&&range.isEmpty())return range.start;if(text==this.getTextRange(range))return range.end;this.remove(range);var end;return end=text?this.insert(range.start,text):range.start},this.applyDeltas=function(deltas){for(var i=0;deltas.length>i;i++)this.applyDelta(deltas[i])},this.revertDeltas=function(deltas){for(var i=deltas.length-1;i>=0;i--)this.revertDelta(deltas[i])},this.applyDelta=function(delta,doNotValidate){var isInsert=\"insert\"==delta.action;(isInsert?1>=delta.lines.length&&!delta.lines[0]:!Range.comparePoints(delta.start,delta.end))||(isInsert&&delta.lines.length>2e4&&this.$splitAndapplyLargeDelta(delta,2e4),applyDelta(this.$lines,delta,doNotValidate),this._signal(\"change\",delta))},this.$splitAndapplyLargeDelta=function(delta,MAX){for(var lines=delta.lines,l=lines.length,row=delta.start.row,column=delta.start.column,from=0,to=0;;){from=to,to+=MAX-1;var chunk=lines.slice(from,to);if(to>l){delta.lines=chunk,delta.start.row=row+from,delta.start.column=column;break}chunk.push(\"\"),this.applyDelta({start:this.pos(row+from,column),end:this.pos(row+to,column=0),action:delta.action,lines:chunk},!0)}},this.revertDelta=function(delta){this.applyDelta({start:this.clonePos(delta.start),end:this.clonePos(delta.end),action:\"insert\"==delta.action?\"remove\":\"insert\",lines:delta.lines.slice()})},this.indexToPosition=function(index,startRow){for(var lines=this.$lines||this.getAllLines(),newlineLength=this.getNewLineCharacter().length,i=startRow||0,l=lines.length;l>i;i++)if(index-=lines[i].length+newlineLength,0>index)return{row:i,column:index+lines[i].length+newlineLength};return{row:l-1,column:lines[l-1].length}},this.positionToIndex=function(pos,startRow){for(var lines=this.$lines||this.getAllLines(),newlineLength=this.getNewLineCharacter().length,index=0,row=Math.min(pos.row,lines.length),i=startRow||0;row>i;++i)index+=lines[i].length+newlineLength;return index+pos.column}}).call(Document.prototype),exports.Document=Document}),ace.define(\"ace/lib/lang\",[\"require\",\"exports\",\"module\"],function(acequire,exports){\"use strict\";exports.last=function(a){return a[a.length-1]},exports.stringReverse=function(string){return string.split(\"\").reverse().join(\"\")},exports.stringRepeat=function(string,count){for(var result=\"\";count>0;)1&count&&(result+=string),(count>>=1)&&(string+=string);return result};var trimBeginRegexp=/^\\s\\s*/,trimEndRegexp=/\\s\\s*$/;exports.stringTrimLeft=function(string){return string.replace(trimBeginRegexp,\"\")},exports.stringTrimRight=function(string){return string.replace(trimEndRegexp,\"\")},exports.copyObject=function(obj){var copy={};for(var key in obj)copy[key]=obj[key];return copy},exports.copyArray=function(array){for(var copy=[],i=0,l=array.length;l>i;i++)copy[i]=array[i]&&\"object\"==typeof array[i]?this.copyObject(array[i]):array[i];return copy},exports.deepCopy=function deepCopy(obj){if(\"object\"!=typeof obj||!obj)return obj;var copy;if(Array.isArray(obj)){copy=[];for(var key=0;obj.length>key;key++)copy[key]=deepCopy(obj[key]);return copy}if(\"[object Object]\"!==Object.prototype.toString.call(obj))return obj;copy={};for(var key in obj)copy[key]=deepCopy(obj[key]);return copy},exports.arrayToMap=function(arr){for(var map={},i=0;arr.length>i;i++)map[arr[i]]=1;return map},exports.createMap=function(props){var map=Object.create(null);for(var i in props)map[i]=props[i];return map},exports.arrayRemove=function(array,value){for(var i=0;array.length>=i;i++)value===array[i]&&array.splice(i,1)},exports.escapeRegExp=function(str){return str.replace(/([.*+?^${}()|[\\]\\/\\\\])/g,\"\\\\$1\")},exports.escapeHTML=function(str){return str.replace(/&/g,\"&#38;\").replace(/\"/g,\"&#34;\").replace(/'/g,\"&#39;\").replace(/</g,\"&#60;\")},exports.getMatchOffsets=function(string,regExp){var matches=[];return string.replace(regExp,function(str){matches.push({offset:arguments[arguments.length-2],length:str.length})}),matches},exports.deferredCall=function(fcn){var timer=null,callback=function(){timer=null,fcn()},deferred=function(timeout){return deferred.cancel(),timer=setTimeout(callback,timeout||0),deferred};return deferred.schedule=deferred,deferred.call=function(){return this.cancel(),fcn(),deferred},deferred.cancel=function(){return clearTimeout(timer),timer=null,deferred},deferred.isPending=function(){return timer},deferred},exports.delayedCall=function(fcn,defaultTimeout){var timer=null,callback=function(){timer=null,fcn()},_self=function(timeout){null==timer&&(timer=setTimeout(callback,timeout||defaultTimeout))};return _self.delay=function(timeout){timer&&clearTimeout(timer),timer=setTimeout(callback,timeout||defaultTimeout)},_self.schedule=_self,_self.call=function(){this.cancel(),fcn()},_self.cancel=function(){timer&&clearTimeout(timer),timer=null},_self.isPending=function(){return timer},_self}}),ace.define(\"ace/worker/mirror\",[\"require\",\"exports\",\"module\",\"ace/range\",\"ace/document\",\"ace/lib/lang\"],function(acequire,exports){\"use strict\";acequire(\"../range\").Range;var Document=acequire(\"../document\").Document,lang=acequire(\"../lib/lang\"),Mirror=exports.Mirror=function(sender){this.sender=sender;var doc=this.doc=new Document(\"\"),deferredUpdate=this.deferredUpdate=lang.delayedCall(this.onUpdate.bind(this)),_self=this;sender.on(\"change\",function(e){var data=e.data;if(data[0].start)doc.applyDeltas(data);else for(var i=0;data.length>i;i+=2){if(Array.isArray(data[i+1]))var d={action:\"insert\",start:data[i],lines:data[i+1]};else var d={action:\"remove\",start:data[i],end:data[i+1]};doc.applyDelta(d,!0)}return _self.$timeout?deferredUpdate.schedule(_self.$timeout):(_self.onUpdate(),void 0)})};(function(){this.$timeout=500,this.setTimeout=function(timeout){this.$timeout=timeout},this.setValue=function(value){this.doc.setValue(value),this.deferredUpdate.schedule(this.$timeout)},this.getValue=function(callbackId){this.sender.callback(this.doc.getValue(),callbackId)},this.onUpdate=function(){},this.isPending=function(){return this.deferredUpdate.isPending()}}).call(Mirror.prototype)}),ace.define(\"ace/mode/json/json_parse\",[\"require\",\"exports\",\"module\"],function(){\"use strict\";var at,ch,text,value,escapee={'\"':'\"',\"\\\\\":\"\\\\\",\"/\":\"/\",b:\"\\b\",f:\"\\f\",n:\"\\n\",r:\"\\r\",t:\"\t\"},error=function(m){throw{name:\"SyntaxError\",message:m,at:at,text:text}},next=function(c){return c&&c!==ch&&error(\"Expected '\"+c+\"' instead of '\"+ch+\"'\"),ch=text.charAt(at),at+=1,ch},number=function(){var number,string=\"\";for(\"-\"===ch&&(string=\"-\",next(\"-\"));ch>=\"0\"&&\"9\">=ch;)string+=ch,next();if(\".\"===ch)for(string+=\".\";next()&&ch>=\"0\"&&\"9\">=ch;)string+=ch;if(\"e\"===ch||\"E\"===ch)for(string+=ch,next(),(\"-\"===ch||\"+\"===ch)&&(string+=ch,next());ch>=\"0\"&&\"9\">=ch;)string+=ch,next();return number=+string,isNaN(number)?(error(\"Bad number\"),void 0):number},string=function(){var hex,i,uffff,string=\"\";if('\"'===ch)for(;next();){if('\"'===ch)return next(),string;if(\"\\\\\"===ch)if(next(),\"u\"===ch){for(uffff=0,i=0;4>i&&(hex=parseInt(next(),16),isFinite(hex));i+=1)uffff=16*uffff+hex;string+=String.fromCharCode(uffff)}else{if(\"string\"!=typeof escapee[ch])break;string+=escapee[ch]}else string+=ch}error(\"Bad string\")},white=function(){for(;ch&&\" \">=ch;)next()},word=function(){switch(ch){case\"t\":return next(\"t\"),next(\"r\"),next(\"u\"),next(\"e\"),!0;case\"f\":return next(\"f\"),next(\"a\"),next(\"l\"),next(\"s\"),next(\"e\"),!1;case\"n\":return next(\"n\"),next(\"u\"),next(\"l\"),next(\"l\"),null}error(\"Unexpected '\"+ch+\"'\")},array=function(){var array=[];if(\"[\"===ch){if(next(\"[\"),white(),\"]\"===ch)return next(\"]\"),array;for(;ch;){if(array.push(value()),white(),\"]\"===ch)return next(\"]\"),array;next(\",\"),white()}}error(\"Bad array\")},object=function(){var key,object={};if(\"{\"===ch){if(next(\"{\"),white(),\"}\"===ch)return next(\"}\"),object;for(;ch;){if(key=string(),white(),next(\":\"),Object.hasOwnProperty.call(object,key)&&error('Duplicate key \"'+key+'\"'),object[key]=value(),white(),\"}\"===ch)return next(\"}\"),object;next(\",\"),white()}}error(\"Bad object\")};return value=function(){switch(white(),ch){case\"{\":return object();case\"[\":return array();case'\"':return string();case\"-\":return number();default:return ch>=\"0\"&&\"9\">=ch?number():word()}},function(source,reviver){var result;return text=source,at=0,ch=\" \",result=value(),white(),ch&&error(\"Syntax error\"),\"function\"==typeof reviver?function walk(holder,key){var k,v,value=holder[key];if(value&&\"object\"==typeof value)for(k in value)Object.hasOwnProperty.call(value,k)&&(v=walk(value,k),void 0!==v?value[k]=v:delete value[k]);return reviver.call(holder,key,value)}({\"\":result},\"\"):result}}),ace.define(\"ace/mode/json_worker\",[\"require\",\"exports\",\"module\",\"ace/lib/oop\",\"ace/worker/mirror\",\"ace/mode/json/json_parse\"],function(acequire,exports){\"use strict\";var oop=acequire(\"../lib/oop\"),Mirror=acequire(\"../worker/mirror\").Mirror,parse=acequire(\"./json/json_parse\"),JsonWorker=exports.JsonWorker=function(sender){Mirror.call(this,sender),this.setTimeout(200)};oop.inherits(JsonWorker,Mirror),function(){this.onUpdate=function(){var value=this.doc.getValue(),errors=[];try{value&&parse(value)}catch(e){var pos=this.doc.indexToPosition(e.at-1);errors.push({row:pos.row,column:pos.column,text:e.message,type:\"error\"})}this.sender.emit(\"annotate\",errors)}}.call(JsonWorker.prototype)}),ace.define(\"ace/lib/es5-shim\",[\"require\",\"exports\",\"module\"],function(){function Empty(){}function doesDefinePropertyWork(object){try{return Object.defineProperty(object,\"sentinel\",{}),\"sentinel\"in object}catch(exception){}}function toInteger(n){return n=+n,n!==n?n=0:0!==n&&n!==1/0&&n!==-(1/0)&&(n=(n>0||-1)*Math.floor(Math.abs(n))),n}Function.prototype.bind||(Function.prototype.bind=function(that){var target=this;if(\"function\"!=typeof target)throw new TypeError(\"Function.prototype.bind called on incompatible \"+target);var args=slice.call(arguments,1),bound=function(){if(this instanceof bound){var result=target.apply(this,args.concat(slice.call(arguments)));return Object(result)===result?result:this}return target.apply(that,args.concat(slice.call(arguments)))};return target.prototype&&(Empty.prototype=target.prototype,bound.prototype=new Empty,Empty.prototype=null),bound});var defineGetter,defineSetter,lookupGetter,lookupSetter,supportsAccessors,call=Function.prototype.call,prototypeOfArray=Array.prototype,prototypeOfObject=Object.prototype,slice=prototypeOfArray.slice,_toString=call.bind(prototypeOfObject.toString),owns=call.bind(prototypeOfObject.hasOwnProperty);if((supportsAccessors=owns(prototypeOfObject,\"__defineGetter__\"))&&(defineGetter=call.bind(prototypeOfObject.__defineGetter__),defineSetter=call.bind(prototypeOfObject.__defineSetter__),lookupGetter=call.bind(prototypeOfObject.__lookupGetter__),lookupSetter=call.bind(prototypeOfObject.__lookupSetter__)),2!=[1,2].splice(0).length)if(function(){function makeArray(l){var a=Array(l+2);return a[0]=a[1]=0,a}var lengthBefore,array=[];return array.splice.apply(array,makeArray(20)),array.splice.apply(array,makeArray(26)),lengthBefore=array.length,array.splice(5,0,\"XXX\"),lengthBefore+1==array.length,lengthBefore+1==array.length?!0:void 0\n}()){var array_splice=Array.prototype.splice;Array.prototype.splice=function(start,deleteCount){return arguments.length?array_splice.apply(this,[void 0===start?0:start,void 0===deleteCount?this.length-start:deleteCount].concat(slice.call(arguments,2))):[]}}else Array.prototype.splice=function(pos,removeCount){var length=this.length;pos>0?pos>length&&(pos=length):void 0==pos?pos=0:0>pos&&(pos=Math.max(length+pos,0)),length>pos+removeCount||(removeCount=length-pos);var removed=this.slice(pos,pos+removeCount),insert=slice.call(arguments,2),add=insert.length;if(pos===length)add&&this.push.apply(this,insert);else{var remove=Math.min(removeCount,length-pos),tailOldPos=pos+remove,tailNewPos=tailOldPos+add-remove,tailCount=length-tailOldPos,lengthAfterRemove=length-remove;if(tailOldPos>tailNewPos)for(var i=0;tailCount>i;++i)this[tailNewPos+i]=this[tailOldPos+i];else if(tailNewPos>tailOldPos)for(i=tailCount;i--;)this[tailNewPos+i]=this[tailOldPos+i];if(add&&pos===lengthAfterRemove)this.length=lengthAfterRemove,this.push.apply(this,insert);else for(this.length=lengthAfterRemove+add,i=0;add>i;++i)this[pos+i]=insert[i]}return removed};Array.isArray||(Array.isArray=function(obj){return\"[object Array]\"==_toString(obj)});var boxedString=Object(\"a\"),splitString=\"a\"!=boxedString[0]||!(0 in boxedString);if(Array.prototype.forEach||(Array.prototype.forEach=function(fun){var object=toObject(this),self=splitString&&\"[object String]\"==_toString(this)?this.split(\"\"):object,thisp=arguments[1],i=-1,length=self.length>>>0;if(\"[object Function]\"!=_toString(fun))throw new TypeError;for(;length>++i;)i in self&&fun.call(thisp,self[i],i,object)}),Array.prototype.map||(Array.prototype.map=function(fun){var object=toObject(this),self=splitString&&\"[object String]\"==_toString(this)?this.split(\"\"):object,length=self.length>>>0,result=Array(length),thisp=arguments[1];if(\"[object Function]\"!=_toString(fun))throw new TypeError(fun+\" is not a function\");for(var i=0;length>i;i++)i in self&&(result[i]=fun.call(thisp,self[i],i,object));return result}),Array.prototype.filter||(Array.prototype.filter=function(fun){var value,object=toObject(this),self=splitString&&\"[object String]\"==_toString(this)?this.split(\"\"):object,length=self.length>>>0,result=[],thisp=arguments[1];if(\"[object Function]\"!=_toString(fun))throw new TypeError(fun+\" is not a function\");for(var i=0;length>i;i++)i in self&&(value=self[i],fun.call(thisp,value,i,object)&&result.push(value));return result}),Array.prototype.every||(Array.prototype.every=function(fun){var object=toObject(this),self=splitString&&\"[object String]\"==_toString(this)?this.split(\"\"):object,length=self.length>>>0,thisp=arguments[1];if(\"[object Function]\"!=_toString(fun))throw new TypeError(fun+\" is not a function\");for(var i=0;length>i;i++)if(i in self&&!fun.call(thisp,self[i],i,object))return!1;return!0}),Array.prototype.some||(Array.prototype.some=function(fun){var object=toObject(this),self=splitString&&\"[object String]\"==_toString(this)?this.split(\"\"):object,length=self.length>>>0,thisp=arguments[1];if(\"[object Function]\"!=_toString(fun))throw new TypeError(fun+\" is not a function\");for(var i=0;length>i;i++)if(i in self&&fun.call(thisp,self[i],i,object))return!0;return!1}),Array.prototype.reduce||(Array.prototype.reduce=function(fun){var object=toObject(this),self=splitString&&\"[object String]\"==_toString(this)?this.split(\"\"):object,length=self.length>>>0;if(\"[object Function]\"!=_toString(fun))throw new TypeError(fun+\" is not a function\");if(!length&&1==arguments.length)throw new TypeError(\"reduce of empty array with no initial value\");var result,i=0;if(arguments.length>=2)result=arguments[1];else for(;;){if(i in self){result=self[i++];break}if(++i>=length)throw new TypeError(\"reduce of empty array with no initial value\")}for(;length>i;i++)i in self&&(result=fun.call(void 0,result,self[i],i,object));return result}),Array.prototype.reduceRight||(Array.prototype.reduceRight=function(fun){var object=toObject(this),self=splitString&&\"[object String]\"==_toString(this)?this.split(\"\"):object,length=self.length>>>0;if(\"[object Function]\"!=_toString(fun))throw new TypeError(fun+\" is not a function\");if(!length&&1==arguments.length)throw new TypeError(\"reduceRight of empty array with no initial value\");var result,i=length-1;if(arguments.length>=2)result=arguments[1];else for(;;){if(i in self){result=self[i--];break}if(0>--i)throw new TypeError(\"reduceRight of empty array with no initial value\")}do i in this&&(result=fun.call(void 0,result,self[i],i,object));while(i--);return result}),Array.prototype.indexOf&&-1==[0,1].indexOf(1,2)||(Array.prototype.indexOf=function(sought){var self=splitString&&\"[object String]\"==_toString(this)?this.split(\"\"):toObject(this),length=self.length>>>0;if(!length)return-1;var i=0;for(arguments.length>1&&(i=toInteger(arguments[1])),i=i>=0?i:Math.max(0,length+i);length>i;i++)if(i in self&&self[i]===sought)return i;return-1}),Array.prototype.lastIndexOf&&-1==[0,1].lastIndexOf(0,-3)||(Array.prototype.lastIndexOf=function(sought){var self=splitString&&\"[object String]\"==_toString(this)?this.split(\"\"):toObject(this),length=self.length>>>0;if(!length)return-1;var i=length-1;for(arguments.length>1&&(i=Math.min(i,toInteger(arguments[1]))),i=i>=0?i:length-Math.abs(i);i>=0;i--)if(i in self&&sought===self[i])return i;return-1}),Object.getPrototypeOf||(Object.getPrototypeOf=function(object){return object.__proto__||(object.constructor?object.constructor.prototype:prototypeOfObject)}),!Object.getOwnPropertyDescriptor){var ERR_NON_OBJECT=\"Object.getOwnPropertyDescriptor called on a non-object: \";Object.getOwnPropertyDescriptor=function(object,property){if(\"object\"!=typeof object&&\"function\"!=typeof object||null===object)throw new TypeError(ERR_NON_OBJECT+object);if(owns(object,property)){var descriptor,getter,setter;if(descriptor={enumerable:!0,configurable:!0},supportsAccessors){var prototype=object.__proto__;object.__proto__=prototypeOfObject;var getter=lookupGetter(object,property),setter=lookupSetter(object,property);if(object.__proto__=prototype,getter||setter)return getter&&(descriptor.get=getter),setter&&(descriptor.set=setter),descriptor}return descriptor.value=object[property],descriptor}}}if(Object.getOwnPropertyNames||(Object.getOwnPropertyNames=function(object){return Object.keys(object)}),!Object.create){var createEmpty;createEmpty=null===Object.prototype.__proto__?function(){return{__proto__:null}}:function(){var empty={};for(var i in empty)empty[i]=null;return empty.constructor=empty.hasOwnProperty=empty.propertyIsEnumerable=empty.isPrototypeOf=empty.toLocaleString=empty.toString=empty.valueOf=empty.__proto__=null,empty},Object.create=function(prototype,properties){var object;if(null===prototype)object=createEmpty();else{if(\"object\"!=typeof prototype)throw new TypeError(\"typeof prototype[\"+typeof prototype+\"] != 'object'\");var Type=function(){};Type.prototype=prototype,object=new Type,object.__proto__=prototype}return void 0!==properties&&Object.defineProperties(object,properties),object}}if(Object.defineProperty){var definePropertyWorksOnObject=doesDefinePropertyWork({}),definePropertyWorksOnDom=\"undefined\"==typeof document||doesDefinePropertyWork(document.createElement(\"div\"));if(!definePropertyWorksOnObject||!definePropertyWorksOnDom)var definePropertyFallback=Object.defineProperty}if(!Object.defineProperty||definePropertyFallback){var ERR_NON_OBJECT_DESCRIPTOR=\"Property description must be an object: \",ERR_NON_OBJECT_TARGET=\"Object.defineProperty called on non-object: \",ERR_ACCESSORS_NOT_SUPPORTED=\"getters & setters can not be defined on this javascript engine\";Object.defineProperty=function(object,property,descriptor){if(\"object\"!=typeof object&&\"function\"!=typeof object||null===object)throw new TypeError(ERR_NON_OBJECT_TARGET+object);if(\"object\"!=typeof descriptor&&\"function\"!=typeof descriptor||null===descriptor)throw new TypeError(ERR_NON_OBJECT_DESCRIPTOR+descriptor);if(definePropertyFallback)try{return definePropertyFallback.call(Object,object,property,descriptor)}catch(exception){}if(owns(descriptor,\"value\"))if(supportsAccessors&&(lookupGetter(object,property)||lookupSetter(object,property))){var prototype=object.__proto__;object.__proto__=prototypeOfObject,delete object[property],object[property]=descriptor.value,object.__proto__=prototype}else object[property]=descriptor.value;else{if(!supportsAccessors)throw new TypeError(ERR_ACCESSORS_NOT_SUPPORTED);owns(descriptor,\"get\")&&defineGetter(object,property,descriptor.get),owns(descriptor,\"set\")&&defineSetter(object,property,descriptor.set)}return object}}Object.defineProperties||(Object.defineProperties=function(object,properties){for(var property in properties)owns(properties,property)&&Object.defineProperty(object,property,properties[property]);return object}),Object.seal||(Object.seal=function(object){return object}),Object.freeze||(Object.freeze=function(object){return object});try{Object.freeze(function(){})}catch(exception){Object.freeze=function(freezeObject){return function(object){return\"function\"==typeof object?object:freezeObject(object)}}(Object.freeze)}if(Object.preventExtensions||(Object.preventExtensions=function(object){return object}),Object.isSealed||(Object.isSealed=function(){return!1}),Object.isFrozen||(Object.isFrozen=function(){return!1}),Object.isExtensible||(Object.isExtensible=function(object){if(Object(object)===object)throw new TypeError;for(var name=\"\";owns(object,name);)name+=\"?\";object[name]=!0;var returnValue=owns(object,name);return delete object[name],returnValue}),!Object.keys){var hasDontEnumBug=!0,dontEnums=[\"toString\",\"toLocaleString\",\"valueOf\",\"hasOwnProperty\",\"isPrototypeOf\",\"propertyIsEnumerable\",\"constructor\"],dontEnumsLength=dontEnums.length;for(var key in{toString:null})hasDontEnumBug=!1;Object.keys=function(object){if(\"object\"!=typeof object&&\"function\"!=typeof object||null===object)throw new TypeError(\"Object.keys called on a non-object\");var keys=[];for(var name in object)owns(object,name)&&keys.push(name);if(hasDontEnumBug)for(var i=0,ii=dontEnumsLength;ii>i;i++){var dontEnum=dontEnums[i];owns(object,dontEnum)&&keys.push(dontEnum)}return keys}}Date.now||(Date.now=function(){return(new Date).getTime()});var ws=\"\t\\n\u000b\\f\\r   ᠎             　\\u2028\\u2029﻿\";if(!String.prototype.trim||ws.trim()){ws=\"[\"+ws+\"]\";var trimBeginRegexp=RegExp(\"^\"+ws+ws+\"*\"),trimEndRegexp=RegExp(ws+ws+\"*$\");String.prototype.trim=function(){return(this+\"\").replace(trimBeginRegexp,\"\").replace(trimEndRegexp,\"\")}}var toObject=function(o){if(null==o)throw new TypeError(\"can't convert \"+o+\" to object\");return Object(o)}});";
 
 /***/ },
-/* 20 */
+/* 21 */
 /***/ function(module, exports) {
 
 	ace.define("ace/ext/searchbox",["require","exports","module","ace/lib/dom","ace/lib/lang","ace/lib/event","ace/keyboard/hash_handler","ace/lib/keys"], function(acequire, exports, module) {
@@ -11299,7 +11509,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	            
 
 /***/ },
-/* 21 */
+/* 22 */
 /***/ function(module, exports) {
 
 	/* ***** BEGIN LICENSE BLOCK *****

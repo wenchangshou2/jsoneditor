@@ -25,7 +25,7 @@
  *
  * @author  Jos de Jong, <wjosdejong@gmail.com>
  * @version 5.16.0
- * @date    2018-05-31
+ * @date    2018-06-01
  */
 (function webpackUniversalModuleDefinition(root, factory) {
 	if(typeof exports === 'object' && typeof module === 'object')
@@ -15441,7 +15441,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  if (nodes && nodes.length > 0) {
-	    console.log('remove nodes',nodes);
 	    var firstNode = nodes[0];
 	    var parent = firstNode.parent;
 	    var editor = firstNode.editor;
@@ -15488,7 +15487,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var lastNode = nodes[nodes.length - 1];
 	    var parent = lastNode.parent;
 	    var editor = lastNode.editor;
-
+	    let data=JSON.parse(editor.getText())
 	    editor.deselect(editor.multiselection.nodes);
 
 	    // duplicate the nodes
@@ -15500,7 +15499,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      afterNode = clone;
 	      return clone;
 	    });
-
+	    let copy = data[parent.field][clones[0].index]
 	    // set selection to the duplicated nodes
 	    if (nodes.length === 1) {
 	      clones[0].focus();

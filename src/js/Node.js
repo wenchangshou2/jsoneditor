@@ -2879,7 +2879,6 @@ Node.onRemove = function (nodes) {
   }
 
   if (nodes && nodes.length > 0) {
-    console.log('remove nodes',nodes);
     var firstNode = nodes[0];
     var parent = firstNode.parent;
     var editor = firstNode.editor;
@@ -2926,7 +2925,7 @@ Node.onDuplicate = function (nodes) {
     var lastNode = nodes[nodes.length - 1];
     var parent = lastNode.parent;
     var editor = lastNode.editor;
-
+    let data=JSON.parse(editor.getText())
     editor.deselect(editor.multiselection.nodes);
 
     // duplicate the nodes
@@ -2938,7 +2937,7 @@ Node.onDuplicate = function (nodes) {
       afterNode = clone;
       return clone;
     });
-
+    let copy = data[parent.field][clones[0].index]
     // set selection to the duplicated nodes
     if (nodes.length === 1) {
       clones[0].focus();
